@@ -1,0 +1,20 @@
+MediaKit (kandysoft/media-kit)
+Copyright (c) 2024-2026 KandySoft
+
+This package is original work. It was extracted from kandyBack, where it
+replaced the media handling of Bagisto; no Bagisto code remains in it.
+
+Attribution requirement
+-----------------------
+The MIT License requires that the copyright notice above and the full license
+text (see LICENSE) are included in all copies or substantial portions of the
+software, including redistributions in binary form. Keeping this NOTICE file
+alongside LICENSE satisfies that requirement.
+
+Third-party dependencies
+------------------------
+Dependencies installed via Composer are distributed under their own licenses
+and are not covered by this notice:
+
+  intervention/image  — MIT
+  laravel/framework   — MIT
