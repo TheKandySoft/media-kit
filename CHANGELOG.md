@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1
+
+Packaging only — no code changes.
+
+- `homepage` and the `support` links pointed at `github.com/kandysoft/media-kit`, an organisation
+  that does not exist; every one of them 404'd from the Packagist page. They now point at
+  `TheKandySoft`.
+- `LICENSE`, `pint.json` and `resources/default.webp` were committed with the executable bit set.
+- `NOTICE` now says explicitly that the two packages it lists are the direct requirements, and that
+  the transitive set is permissive too.
+
 ## 1.0.0
 
 First release as a standalone package, extracted from kandyBack.

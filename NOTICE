@@ -14,7 +14,10 @@ alongside LICENSE satisfies that requirement.
 Third-party dependencies
 ------------------------
 Dependencies installed via Composer are distributed under their own licenses
-and are not covered by this notice:
+and are not covered by this notice. Direct requirements:
 
   intervention/image  — MIT
   laravel/framework   — MIT
+
+Their transitive dependencies are permissive as well (MIT, BSD-3-Clause,
+Apache-2.0); run `composer licenses` for the resolved list.

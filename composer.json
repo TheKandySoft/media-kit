@@ -4,10 +4,10 @@
     "type": "library",
     "license": "MIT",
     "keywords": ["laravel", "media", "images", "uploads", "filesystem"],
-    "homepage": "https://github.com/kandysoft/media-kit",
+    "homepage": "https://github.com/TheKandySoft/media-kit",
     "support": {
-        "issues": "https://github.com/kandysoft/media-kit/issues",
-        "source": "https://github.com/kandysoft/media-kit"
+        "issues": "https://github.com/TheKandySoft/media-kit/issues",
+        "source": "https://github.com/TheKandySoft/media-kit"
     },
     "require": {
         "php": "^8.4",
