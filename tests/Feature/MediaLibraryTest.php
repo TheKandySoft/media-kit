@@ -411,3 +411,26 @@ it('gives a replaced picture a new address', function () {
 
     Carbon::setTestNow();
 });
+
+it('answers a repeat request for an unchanged file in a few bytes', function () {
+    // Файл, який тече через застосунок, кешується коротко за визначенням, тож
+    // повертаються по нього часто — і без валідатора щоразу їде все тіло.
+    Storage::fake('secret');
+    config(['filesystems.disks.secret.visibility' => 'private']);
+
+    $media = MediaFile::query()->create([
+        'disk' => 'secret',
+        'path' => 'media/private/' . uniqid() . '.png',
+        'type' => MediaType::Image,
+        'is_public' => false,
+    ]);
+
+    Storage::disk('secret')->put($media->path, 'bytes');
+
+    $url = URL::temporarySignedRoute('media-kit.download', now()->addMinutes(15), ['uuid' => $media->uuid]);
+    $etag = $this->get($url)->headers->get('ETag');
+
+    expect($etag)->not->toBeNull();
+
+    $this->get($url, ['If-None-Match' => $etag])->assertStatus(304);
+});

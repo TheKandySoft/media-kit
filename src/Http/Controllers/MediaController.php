@@ -78,6 +78,16 @@ class MediaController extends Controller
 
         abort_unless($disk->exists($media->path), 404);
 
+        $etag = $this->etag($media);
+        $headers['ETag'] = $etag;
+
+        // A short-lived file cannot be cached for long, so it comes back often.
+        // Answering "still the same" in a few bytes is the difference between
+        // that and streaming the whole thing again on every visit.
+        if (in_array($etag, $request->getETags(), true)) {
+            return response('', 304, $headers);
+        }
+
         $filename = $media->original_name ?? basename($media->path);
 
         return new StreamedResponse(
@@ -93,6 +103,18 @@ class MediaController extends Controller
                 'Content-Length' => (string) ($media->size ?? $disk->size($media->path) ?? 0),
             ] + $headers,
         );
+    }
+
+    /**
+     * A validator for the bytes behind this uuid.
+     *
+     * Weak, because two responses for the same version are equivalent without
+     * being byte-identical — the disposition differs between viewing and
+     * downloading.
+     */
+    private function etag(MediaFile $media): string
+    {
+        return sprintf('W/"%s-%d"', $media->uuid, $media->updated_at?->getTimestamp() ?? 0);
     }
 
     /**
