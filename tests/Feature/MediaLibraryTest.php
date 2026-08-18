@@ -311,3 +311,33 @@ it('reports a public disk as public and a private one as private', function () {
     expect(app(MediaStorage::class)->disk('public')->isPublic())->toBeTrue()
         ->and(app(MediaStorage::class)->disk('secret')->isPublic())->toBeFalse();
 });
+
+it('lets one disk expire its links while another keeps them forever', function () {
+    // Це те, чого раніше не можна було висловити взагалі: строк був один на
+    // весь застосунок, тож «документи живуть чверть години, а фото каталогу —
+    // завжди» доводилось обирати як щось одне.
+    Storage::fake('documents');
+    config([
+        'filesystems.disks.documents.visibility' => 'public',
+        'media-kit.disks.documents' => ['variant_url_ttl' => 15],
+    ]);
+
+    $catalogue = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+    $document = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('b.png', 400, 400)), null, 'documents');
+
+    $read = fn(string $uuid): ?string => app(MediaReader::class)
+        ->byUuid($uuid, new MediaFilter(), ImageSize::of(200, 200))
+        ->variant('large')?->url;
+
+    expect($read($catalogue->uuid))->not->toContain('expires=')
+        ->and($read($document->uuid))->toContain('expires=');
+});
+
+it('leaves a disk nobody configured exactly as it was', function () {
+    config(['media-kit.disks.documents' => ['variant_url_ttl' => 15]]);
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url)
+        ->not->toContain('expires=');
+});

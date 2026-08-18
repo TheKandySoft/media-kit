@@ -106,26 +106,25 @@ class MediaController extends Controller
      *
      * A private file is a different matter on both counts. It belongs only in
      * the visitor's own cache, and it is reached through a link that expires,
-     * so the answer must not outlive the link it points at — otherwise the
-     * browser keeps following a cached redirect to an address that has since
-     * stopped working.
+     * so the answer must not outlive the link it points at.
      *
      * @return array<string, string>
      */
     private function cacheHeaders(MediaFile $media): array
     {
-        $seconds = (int) $this->config->get('media-kit.cache_ttl', 31536000);
+        $policy = $this->storage->disk($media->disk)->policy();
 
-        if ($seconds <= 0) {
+        if ($policy->cacheTtl <= 0) {
             return ['Cache-Control' => 'no-cache, must-revalidate'];
         }
 
-        if (! $media->is_public) {
-            $linkLifetime = (int) $this->config->get('media-kit.temporary_url_ttl', 60) * 60;
-
-            return ['Cache-Control' => sprintf('private, max-age=%d', min($seconds, $linkLifetime))];
+        if (! $policy->public) {
+            return ['Cache-Control' => sprintf(
+                'private, max-age=%d',
+                min($policy->cacheTtl, $policy->temporaryUrlTtl * 60),
+            )];
         }
 
-        return ['Cache-Control' => sprintf('public, max-age=%d, immutable', $seconds)];
+        return ['Cache-Control' => sprintf('public, max-age=%d, immutable', $policy->cacheTtl)];
     }
 }

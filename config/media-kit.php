@@ -69,6 +69,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Per-disk policy
+    |--------------------------------------------------------------------------
+    |
+    | The three settings above are the defaults; this is where a disk says it
+    | wants something else. Keys are disk names from config/filesystems.php,
+    | and a disk nobody mentions here behaves exactly like every other one.
+    |
+    | The unit of policy is the disk on purpose. Catalogue pictures want
+    | permanent, heavily cached addresses; a scanned document wants a link that
+    | stops working. Keeping that decision attached to where the file is stored
+    | means the wrong file cannot quietly acquire the wrong policy.
+    |
+    |   'documents' => [
+    |       'temporary_url_ttl' => 15,
+    |       'variant_url_ttl'   => 15,
+    |       'cache_ttl'         => 900,
+    |   ],
+    |
+    */
+
+    'disks' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Images
     |--------------------------------------------------------------------------
     |

@@ -4,6 +4,7 @@ namespace KandySoft\MediaKit\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
+use KandySoft\MediaKit\Data\MediaPolicy;
 use KandySoft\MediaKit\Exceptions\MediaNotFound;
 use RuntimeException;
 
@@ -14,14 +15,17 @@ use RuntimeException;
  * the host configures all arrive here as a plain Filesystem. Whether files are
  * publicly reachable comes from the disk's own `visibility`, not from the class
  * that happens to wrap it.
+ *
+ * How long its links live comes from the same place — see `MediaPolicy`. That
+ * is what makes "documents expire in fifteen minutes, catalogue pictures never"
+ * expressible at all: the policy belongs to where the file is stored.
  */
 final class MediaDisk
 {
     public function __construct(
         private readonly string $name,
         private readonly Filesystem $filesystem,
-        private readonly bool $public,
-        private readonly int $temporaryUrlTtl,
+        private readonly MediaPolicy $policy,
     ) {}
 
     public function name(): string
@@ -31,7 +35,12 @@ final class MediaDisk
 
     public function isPublic(): bool
     {
-        return $this->public;
+        return $this->policy->public;
+    }
+
+    public function policy(): MediaPolicy
+    {
+        return $this->policy;
     }
 
     public function filesystem(): Filesystem
@@ -107,9 +116,9 @@ final class MediaDisk
     public function url(string $path): ?string
     {
         try {
-            return $this->public
+            return $this->policy->public
                 ? $this->filesystem->url($path)
-                : $this->filesystem->temporaryUrl($path, now()->addMinutes($this->temporaryUrlTtl));
+                : $this->filesystem->temporaryUrl($path, $this->policy->temporaryUrlExpiry());
         } catch (RuntimeException) {
             return null;
         }

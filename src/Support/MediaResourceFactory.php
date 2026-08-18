@@ -9,6 +9,7 @@ use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\ImageVariant;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
+use KandySoft\MediaKit\Data\MediaPolicy;
 use KandySoft\MediaKit\Data\MediaResource;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Models\MediaFileTranslation;
@@ -21,6 +22,10 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
  * renditions themselves are only ever produced for sizes somebody asked for.
  * Those links are stable: the same file at the same size is always the same
  * address, which is what makes them cacheable and worth indexing.
+ *
+ * Lifetimes are not read from configuration here. They come from the disk the
+ * file lives on, so the link and the cache header that describes it can never
+ * be minted from two different numbers.
  */
 final class MediaResourceFactory
 {
@@ -33,11 +38,12 @@ final class MediaResourceFactory
     public function make(MediaFile $media, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): MediaResource
     {
         $captions = $this->captions($media);
+        $policy = $this->storage->disk($media->disk)->policy();
 
         return new MediaResource(
             uuid: $media->uuid,
             type: $media->type,
-            url: $this->url($media),
+            url: $this->url($media, $policy),
             originalName: $media->original_name,
             mimeType: $media->mime_type,
             extension: $media->extension,
@@ -46,7 +52,7 @@ final class MediaResourceFactory
             height: $media->height,
             position: $media->position,
             caption: $this->selectCaption($captions, $filter->captionLocale),
-            variants: $media->type->isImage() ? $this->variants($media, $size) : [],
+            variants: $media->type->isImage() ? $this->variants($media, $size, $policy) : [],
             captions: $captions,
         );
     }
@@ -56,7 +62,7 @@ final class MediaResourceFactory
      * a signed route when the driver can mint neither — a local private disk,
      * typically, where the application has to stream the bytes itself.
      */
-    private function url(MediaFile $media): string
+    private function url(MediaFile $media, MediaPolicy $policy): string
     {
         $url = $this->storage->disk($media->disk)->url($media->path);
 
@@ -65,14 +71,18 @@ final class MediaResourceFactory
         }
 
         return $this->routesEnabled()
-            ? $this->urls->signedRoute('media-kit.file', ['uuid' => $media->uuid], $this->temporaryUrlExpiry())
+            ? $this->urls->signedRoute(
+                'media-kit.file',
+                ['uuid' => $media->uuid],
+                $policy->temporaryUrlExpiry(),
+            )
             : '';
     }
 
     /**
      * @return array<string, ImageVariant>
      */
-    private function variants(MediaFile $media, ImageSize $size): array
+    private function variants(MediaFile $media, ImageSize $size, MediaPolicy $policy): array
     {
         if (! $this->routesEnabled()) {
             return [];
@@ -100,7 +110,7 @@ final class MediaResourceFactory
                     'width' => $variantWidth,
                     'height' => $variantHeight,
                     'format' => $format,
-                ], $this->variantUrlExpiry()),
+                ], $policy->variantUrlExpiry()),
             );
         }
 
@@ -143,25 +153,4 @@ final class MediaResourceFactory
         return (bool) $this->config->get('media-kit.routes.enabled', true);
     }
 
-    private function temporaryUrlExpiry(): \DateTimeInterface
-    {
-        return now()->addMinutes((int) $this->config->get('media-kit.temporary_url_ttl', 60));
-    }
-
-    /**
-     * When a variant link stops working — by default, never.
-     *
-     * The signature is there so nobody can ask for arbitrary sizes and fill
-     * the disk; it is not there to keep the picture secret. An expiry adds
-     * nothing to that and takes a lot away: the link changes on every render,
-     * so the same bytes are downloaded again by every browser and CDN, and
-     * anything that reads the address once and fetches it later — an image
-     * crawler, a product feed, a shared link preview — finds it dead.
-     */
-    private function variantUrlExpiry(): ?\DateTimeInterface
-    {
-        $minutes = (int) $this->config->get('media-kit.variant_url_ttl', 0);
-
-        return $minutes > 0 ? now()->addMinutes($minutes) : null;
-    }
 }

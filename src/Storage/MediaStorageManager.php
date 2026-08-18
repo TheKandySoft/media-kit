@@ -5,14 +5,10 @@ namespace KandySoft\MediaKit\Storage;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Filesystem\Factory as Filesystems;
 use KandySoft\MediaKit\Contracts\MediaStorage;
+use KandySoft\MediaKit\Data\MediaPolicy;
 
 final class MediaStorageManager implements MediaStorage
 {
-    /**
-     * @var array<string, MediaDisk>
-     */
-    private array $disks = [];
-
     public function __construct(
         private readonly Filesystems $filesystems,
         private readonly Config $config,
@@ -22,17 +18,49 @@ final class MediaStorageManager implements MediaStorage
     {
         $name = $disk ?? $this->defaultDiskName();
 
-        return $this->disks[$name] ??= new MediaDisk(
+        // Built fresh rather than memoised: the wrapper is a few fields around
+        // a filesystem the framework already caches, and holding on to it would
+        // mean holding on to the policy it was built with — configuration
+        // changed afterwards would silently keep the old lifetimes.
+        return new MediaDisk(
             name: $name,
             filesystem: $this->filesystems->disk($name),
-            public: $this->isPublic($name),
-            temporaryUrlTtl: (int) $this->config->get('media-kit.temporary_url_ttl', 60),
+            policy: $this->policyFor($name),
         );
     }
 
     public function defaultDiskName(): string
     {
         return (string) $this->config->get('media-kit.disk', 'public');
+    }
+
+    /**
+     * How this disk hands out what it stores.
+     *
+     * Top-level configuration holds the defaults; `media-kit.disks.<name>`
+     * holds the exceptions. A disk nobody mentioned behaves exactly like every
+     * other one, so adding a second disk with its own rules costs one entry
+     * and changes nothing elsewhere.
+     */
+    public function policyFor(string $disk): MediaPolicy
+    {
+        /** @var array<string, mixed> $overrides */
+        $overrides = (array) $this->config->get("media-kit.disks.{$disk}", []);
+
+        $value = fn(string $key, mixed $default): mixed => array_key_exists($key, $overrides)
+            ? $overrides[$key]
+            : $this->config->get("media-kit.{$key}", $default);
+
+        $variantTtl = $value('variant_url_ttl', null);
+
+        return new MediaPolicy(
+            public: $this->isPublic($disk),
+            temporaryUrlTtl: (int) $value('temporary_url_ttl', 60),
+            // Empty means a link with no expiry. Zero means the same: "valid
+            // for nought minutes" would not be a setting anybody wants.
+            variantUrlTtl: $variantTtl === null || $variantTtl === '' ? null : (int) $variantTtl,
+            cacheTtl: (int) $value('cache_ttl', 31536000),
+        );
     }
 
     /**
