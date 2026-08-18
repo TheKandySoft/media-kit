@@ -122,9 +122,16 @@ $images = $reader->forModel(
 );
 
 $images[0]->url;                       // the original
-$images[0]->variant('medium')?->url;   // signed, generated on first request
+$images[0]->variant('medium')?->url;   // one rendition
+$images[0]->srcset();                  // all of them, for the browser to choose from
+$images[0]->placeholder;               // a tiny data: URI to show meanwhile
 $images[0]->caption?->alt;
 ```
+
+`srcset()` matters more than it looks: without it a phone downloads the picture a desktop gets, to
+paint it a third of the size, over the connection least able to afford it. `placeholder` is a copy a
+few hundred bytes big, stored beside the image — the card shows it instead of an empty box while the
+real file is on its way.
 
 Every read is handed out under the policy of the disk the file lives on. When one caller needs
 something shorter — an admin preview, an export leaving the building — pass a lifetime and it
@@ -172,6 +179,7 @@ URLs, not in the payloads clients receive.
 ```bash
 php artisan media:show <uuid>     # what a client would receive
 php artisan media:adopt           # register files already on a disk
+php artisan media:prune           # drop renditions nothing can reach any more
 ```
 
 ## Documentation

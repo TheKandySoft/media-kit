@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0
+
+Three things a page needs and the package was not giving it.
+
+- **`MediaResource::srcset()`** hands the renditions to the browser as a choice. Without it a phone
+  downloads the same picture a desktop gets, to paint it a third of the size, over the connection
+  least able to afford it. A single rendition returns `null` — a list of one is not a choice.
+- **Placeholders.** Every image now keeps a copy a few hundred bytes big, encoded as a `data:` URI
+  and shipped inside the payload. Until the real file arrives a card had nothing to show, and that
+  gap is both what a visitor reads as slowness and what a layout-shift score measures. Tunable
+  through `image.placeholder*`; oversized ones are dropped rather than shipped.
+- **`media:prune`** removes renditions nothing can reach: a record whose file is gone, and — when
+  told the size the application currently asks for — everything left over from a size it used to
+  ask for. Nothing removed those before, so they accumulated for the life of the shop. `--dry-run`
+  lists without deleting.
+
+Adds a migration for the `placeholder` column. Existing images get one the next time they are
+uploaded or replaced; `media:adopt` fills it for files already on a disk.
+
 ## 1.2.0
 
 The application is no longer in the path of a picture that already exists.
