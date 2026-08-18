@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0
+
+The application is no longer in the path of a picture that already exists.
+
+- **A finished rendition is addressed on the disk.** Variant links pointed at an on-demand endpoint
+  that answered with a redirect, so every thumbnail on a page cost a PHP process, a signature check
+  and a database lookup on the way to a static file. A rendition that has been produced is now
+  linked directly; only one that does not exist yet still goes through the endpoint.
+- **`warmForModel()` and `warmVariants()`** produce renditions up front. An indexer walking the
+  catalogue can warm there, where a few extra seconds are free, instead of leaving the bill with
+  whoever opens the page first — usually a crawler.
+- Existence is read from the recorded variants rather than from the disk, so a listing costs one
+  query instead of a `stat` per rendition. Variants are eager-loaded alongside captions.
+- A private disk keeps the endpoint: a direct address there is a temporary link with a lifetime of
+  its own, which would step around the disk's policy.
+- The size of each named rendition is now worked out in one place (`ImageVariantGenerator::sizesFor`)
+  instead of separately where they are described and where they are written.
+
 ## 1.1.0
 
 Image links became stable, cacheable and honest. All of it matters most to a storefront, where the

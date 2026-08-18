@@ -51,6 +51,28 @@ change the address on every render, so browsers and CDNs would re-download bytes
 and anything that reads an address once and fetches it later — an image crawler, a product feed, a
 link preview — would find it dead.
 
+### Warming, so the first visitor does not wait
+
+Renditions are produced on demand: the first request for a size creates the file. That request pays
+for a redirect through the application, a signature check and a database lookup on the way to what
+is ultimately a static file — and on a catalogue the one paying is usually a search engine reading a
+page nobody has opened yet.
+
+Warm them where the cost is free, and the address of a finished rendition points at the disk:
+
+```php
+$writer->warmForModel($product, MediaFilter::images(), ImageSize::of(800, 600));
+```
+
+Reads decide per rendition: one that already exists is addressed on the disk, one that does not
+still gets the on-demand endpoint. Nothing has to be warmed for the package to work — warming only
+removes the application from the path.
+
+Existence is answered from the recorded variants, not by asking the disk, so describing a listing of
+thirty pictures costs one query rather than ninety `stat` calls. A private disk keeps the endpoint
+either way: a direct address there is a temporary link with a lifetime of its own, which would step
+around the disk's policy.
+
 ### What the package can and cannot cache
 
 Served files carry `Cache-Control`, and an answer never claims to live longer than the signed link
