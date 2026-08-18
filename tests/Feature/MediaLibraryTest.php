@@ -650,3 +650,46 @@ it('touches nothing when asked to look only', function () {
 
     expect($media->variants()->count())->toBe(3);
 });
+
+it('fills in placeholders for pictures stored before it kept them', function () {
+    // Інакше колонка лишається порожньою, доки кожну картинку не завантажать
+    // заново, — для каталогу це «ніколи».
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+    $media->forceFill(['placeholder' => null])->save();
+
+    $this->artisan('media:placeholders')->assertSuccessful();
+
+    expect($media->fresh()->placeholder)->toStartWith('data:image/webp;base64,');
+});
+
+it('leaves a placeholder it already has alone', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+    $media->forceFill(['placeholder' => 'data:image/webp;base64,ЗБЕРЕЖЕНО'])->save();
+
+    $this->artisan('media:placeholders')->assertSuccessful();
+
+    expect($media->fresh()->placeholder)->toBe('data:image/webp;base64,ЗБЕРЕЖЕНО');
+});
+
+it('rebuilds them when told to', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+    $media->forceFill(['placeholder' => 'data:image/webp;base64,СТАРЕ'])->save();
+
+    $this->artisan('media:placeholders', ['--force' => true])->assertSuccessful();
+
+    expect($media->fresh()->placeholder)->not->toBe('data:image/webp;base64,СТАРЕ');
+});
+
+it('does not stop on a file it cannot read', function () {
+    // Один зниклий файл не має лишати решту каталогу без заглушок.
+    $broken = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('gone.png', 400, 400)));
+    $intact = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('here.png', 400, 400)));
+
+    MediaFile::query()->whereIn('uuid', [$broken->uuid, $intact->uuid])->update(['placeholder' => null]);
+    Storage::disk('public')->delete($broken->path);
+
+    $this->artisan('media:placeholders')->assertSuccessful();
+
+    expect($intact->fresh()->placeholder)->not->toBeNull()
+        ->and($broken->fresh()->placeholder)->toBeNull();
+});

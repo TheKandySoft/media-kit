@@ -180,6 +180,7 @@ URLs, not in the payloads clients receive.
 php artisan media:show <uuid>     # what a client would receive
 php artisan media:adopt           # register files already on a disk
 php artisan media:prune           # drop renditions nothing can reach any more
+php artisan media:placeholders    # fill in placeholders for images stored earlier
 ```
 
 ## Documentation

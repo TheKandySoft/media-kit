@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- **`media:placeholders`** fills in placeholders for images stored before 1.3.0 kept them. Without
+  it the column stays empty until every picture happens to be uploaded again, which for a catalogue
+  means never — 1.3.0 shipped the feature and no way to apply it to what was already there.
+  `--force` rebuilds existing ones; a file that cannot be read is reported and skipped rather than
+  stopping the rest.
+
 ## 1.3.0
 
 Three things a page needs and the package was not giving it.
@@ -16,8 +24,8 @@ Three things a page needs and the package was not giving it.
   ask for. Nothing removed those before, so they accumulated for the life of the shop. `--dry-run`
   lists without deleting.
 
-Adds a migration for the `placeholder` column. Existing images get one the next time they are
-uploaded or replaced; `media:adopt` fills it for files already on a disk.
+Adds a migration for the `placeholder` column. Images stored before this release get one from
+`media:placeholders` — see 1.4.0.
 
 ## 1.2.0
 
