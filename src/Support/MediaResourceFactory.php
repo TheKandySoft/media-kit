@@ -22,7 +22,10 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
  * here. Variant links are signed and point at the on-demand endpoint, so the
  * renditions themselves are only ever produced for sizes somebody asked for.
  * Those links are stable: the same file at the same size is always the same
- * address, which is what makes them cacheable and worth indexing.
+ * address, which is what makes them cacheable and worth indexing. Stable is
+ * not the same as frozen — the address carries the file's version, so
+ * replacing the picture behind a uuid produces a new address instead of
+ * leaving caches holding the old bytes.
  *
  * Lifetimes are not read from configuration here. They come from the disk the
  * file lives on, so the link and the cache header that describes it can never
@@ -78,7 +81,7 @@ final class MediaResourceFactory
         return $this->routesEnabled()
             ? $this->urls->signedRoute(
                 'media-kit.file',
-                ['uuid' => $media->uuid],
+                ['uuid' => $media->uuid, 'v' => $this->version($media)],
                 $policy->temporaryUrlExpiry(),
             )
             : '';
@@ -96,6 +99,20 @@ final class MediaResourceFactory
         $policy = $this->storage->disk($media->disk)->policy();
 
         return $lifetime === null ? $policy : $policy->with($lifetime);
+    }
+
+    /**
+     * Which version of the file an address refers to.
+     *
+     * The serving routes are keyed by uuid, and `replace()` deliberately keeps
+     * the uuid so existing references survive. Without a version in the
+     * address that means the same address quietly starts returning different
+     * bytes — and anyone who cached it keeps the old picture. The timestamp
+     * changes on replacement, so the old address is simply orphaned.
+     */
+    private function version(MediaFile $media): int
+    {
+        return $media->updated_at?->getTimestamp() ?? 0;
     }
 
     /**
@@ -129,6 +146,7 @@ final class MediaResourceFactory
                     'width' => $variantWidth,
                     'height' => $variantHeight,
                     'format' => $format,
+                    'v' => $this->version($media),
                 ], $policy->variantUrlExpiry()),
             );
         }

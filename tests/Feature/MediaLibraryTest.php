@@ -392,3 +392,22 @@ it('does not call a link immutable when it expires', function () {
     expect($header)->not->toContain('immutable')
         ->and($header)->toContain('max-age=');
 });
+
+it('gives a replaced picture a new address', function () {
+    // `replace` навмисно зберігає uuid, щоб посилання на нього не зникли, — а
+    // роути ключовані саме по uuid. Без версії в адресі та сама адреса тихо
+    // починала б віддавати інший файл, і всі, хто її закешував, лишились би зі
+    // старим фото на рік.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('before.png', 400, 400)));
+
+    $before = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url;
+
+    Carbon::setTestNow(now()->addMinutes(5));
+    app(MediaWriter::class)->replace($media->uuid, UploadedFile::fake()->image('after.png', 400, 400));
+
+    $after = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url;
+
+    expect($after)->not->toBe($before);
+
+    Carbon::setTestNow();
+});
