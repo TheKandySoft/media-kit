@@ -599,3 +599,54 @@ it('refuses the upload over nothing when the placeholder cannot be made', functi
     expect($media->exists)->toBeTrue()
         ->and($media->placeholder)->toBeNull();
 });
+
+it('sweeps a rendition whose file somebody deleted by hand', function () {
+    // Запис без файлу — це промах на кожен запит того розміру: він щоразу
+    // генерується наново.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+    $variant = app(MediaWriter::class)->ensureVariant($media, 200, 100, 'webp');
+
+    Storage::disk('public')->delete($variant->path);
+
+    $this->artisan('media:prune')->assertSuccessful();
+
+    expect(MediaFile::query()->find($variant->uuid))->toBeNull();
+});
+
+it('sweeps renditions left behind when the shop changed its picture size', function () {
+    // Адреса виводиться з розміру, тож після зміни розміру старих файлів ніхто
+    // більше не питає — і ніхто не прибирає.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+    $stale = $media->variants()->pluck('uuid')->all();
+
+    expect($stale)->toHaveCount(3);
+
+    // 900 дає 900/540/270 — жодного перетину з 400/240/120. Розміри тут
+    // навмисно без спільних чисел: інакше один зі старих збігся б із новим і
+    // вижив би, і тест перевіряв би не те, що заявляє.
+    $this->artisan('media:prune', ['--width' => 900, '--height' => 450])->assertSuccessful();
+
+    expect(MediaFile::query()->whereIn('uuid', $stale)->count())->toBe(0);
+});
+
+it('keeps the renditions the shop is actually serving', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    $this->artisan('media:prune', ['--width' => 400, '--height' => 200])->assertSuccessful();
+
+    expect($media->variants()->count())->toBe(3);
+});
+
+it('touches nothing when asked to look only', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    $this->artisan('media:prune', ['--width' => 900, '--height' => 450, '--dry-run' => true])->assertSuccessful();
+
+    expect($media->variants()->count())->toBe(3);
+});

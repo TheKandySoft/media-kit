@@ -5,6 +5,7 @@ namespace KandySoft\MediaKit\Providers;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use KandySoft\MediaKit\Console\Commands\AdoptMediaFiles;
+use KandySoft\MediaKit\Console\Commands\PruneMediaVariants;
 use KandySoft\MediaKit\Console\Commands\ShowMediaFile;
 use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaStorage;
@@ -53,6 +54,7 @@ class MediaKitServiceProvider extends ServiceProvider
             $this->commands([
                 ShowMediaFile::class,
                 AdoptMediaFiles::class,
+                PruneMediaVariants::class,
             ]);
         }
     }
