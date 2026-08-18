@@ -19,6 +19,8 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
  * This is the boundary: everything internal — disk name, path, owner — stops
  * here. Variant links are signed and point at the on-demand endpoint, so the
  * renditions themselves are only ever produced for sizes somebody asked for.
+ * Those links are stable: the same file at the same size is always the same
+ * address, which is what makes them cacheable and worth indexing.
  */
 final class MediaResourceFactory
 {
@@ -146,8 +148,20 @@ final class MediaResourceFactory
         return now()->addMinutes((int) $this->config->get('media-kit.temporary_url_ttl', 60));
     }
 
-    private function variantUrlExpiry(): \DateTimeInterface
+    /**
+     * When a variant link stops working — by default, never.
+     *
+     * The signature is there so nobody can ask for arbitrary sizes and fill
+     * the disk; it is not there to keep the picture secret. An expiry adds
+     * nothing to that and takes a lot away: the link changes on every render,
+     * so the same bytes are downloaded again by every browser and CDN, and
+     * anything that reads the address once and fetches it later — an image
+     * crawler, a product feed, a shared link preview — finds it dead.
+     */
+    private function variantUrlExpiry(): ?\DateTimeInterface
     {
-        return now()->addMinutes((int) $this->config->get('media-kit.variant_url_ttl', 1440));
+        $minutes = (int) $this->config->get('media-kit.variant_url_ttl', 0);
+
+        return $minutes > 0 ? now()->addMinutes($minutes) : null;
     }
 }

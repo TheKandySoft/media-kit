@@ -34,14 +34,38 @@ return [
     | Link lifetimes (minutes)
     |--------------------------------------------------------------------------
     |
-    | 'temporary_url' covers private files, 'variant_url' the signed links that
-    | trigger on-demand image resizing.
+    | 'temporary_url_ttl' covers private files: the link hands out bytes that
+    | are not meant to be public, so it has to stop working.
+    |
+    | 'variant_url_ttl' covers the signed links that trigger on-demand image
+    | resizing, and it is empty by default. A variant link is signed to stop
+    | anyone from filling the disk with arbitrary sizes, not to keep the image
+    | secret, and an expiry would cost more than it protects: the link changes
+    | on every render, so browsers and CDNs re-download bytes they already
+    | hold, search engines drop images they cannot re-fetch later, and a
+    | product feed goes stale between the moment it is built and the moment
+    | the crawler reads it. Signed but permanent keeps the protection and
+    | none of that. Set a number of minutes only when the images themselves
+    | are private.
     |
     */
 
     'temporary_url_ttl' => (int) env('MEDIA_KIT_TEMPORARY_URL_TTL', 60),
 
-    'variant_url_ttl' => (int) env('MEDIA_KIT_VARIANT_URL_TTL', 1440),
+    'variant_url_ttl' => env('MEDIA_KIT_VARIANT_URL_TTL'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cache lifetime (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | How long a served file may be reused without asking again. Media is
+    | immutable in practice — a replaced picture is a new record with a new
+    | uuid — so the default is a year. Zero disables caching headers.
+    |
+    */
+
+    'cache_ttl' => (int) env('MEDIA_KIT_CACHE_TTL', 31536000),
 
     /*
     |--------------------------------------------------------------------------

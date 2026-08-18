@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.2
+
+Image links are now stable and cacheable. Both changes matter most to a storefront, where the same
+picture is fetched by browsers, CDNs, image crawlers and product feeds rather than by one logged-in
+user.
+
+- **Variant links no longer expire by default.** They were signed with a 24-hour expiry, which meant
+  the address changed on every render: caches never hit, image crawlers found the address dead by the
+  time they came back for it, and a product feed went stale between being built and being read. The
+  signature stays — it is what stops anyone requesting arbitrary sizes and filling the disk — but it
+  is now permanent unless `media-kit.variant_url_ttl` says otherwise, which is what private images
+  still want.
+- **Served files carry cache headers.** A public file is `public, max-age=31536000, immutable`,
+  because a stored file never changes underneath its uuid. A private one is `private` and never
+  outlives the temporary link it redirects to. Tunable through `media-kit.cache_ttl`.
+
 ## 1.0.1
 
 Packaging only — no code changes.

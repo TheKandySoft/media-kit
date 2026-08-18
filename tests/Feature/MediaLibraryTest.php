@@ -2,7 +2,9 @@
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
@@ -200,6 +202,106 @@ it('describes variants as signed links without generating them', function () {
         ->and($resource->variant('medium')?->width)->toBe(240)
         ->and($resource->variant('large')?->url)->toContain('signature=')
         ->and($original->variants()->count())->toBe(0);
+});
+
+it('keeps a variant address stable, so a cache or a crawler can rely on it', function () {
+    // The address used to carry an expiry, which meant it changed on every
+    // render: browsers re-downloaded pictures they already held, and anything
+    // that read the address once and fetched it later — an image crawler, a
+    // product feed, a link preview — arrived at a dead link.
+    $original = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('big.png', 1000, 500)));
+
+    $first = app(MediaReader::class)
+        ->byUuid($original->uuid, new MediaFilter(), ImageSize::of(400, 200))
+        ->variant('large')?->url;
+
+    Carbon::setTestNow(now()->addDays(30));
+
+    $later = app(MediaReader::class)
+        ->byUuid($original->uuid, new MediaFilter(), ImageSize::of(400, 200))
+        ->variant('large')?->url;
+
+    expect($first)->toBe($later)
+        ->and($first)->not->toContain('expires=')
+        ->and($first)->toContain('signature=');
+
+    Carbon::setTestNow();
+});
+
+it('still serves a variant a month after the address was published', function () {
+    $original = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('big.png', 1000, 500)));
+
+    $url = app(MediaReader::class)
+        ->byUuid($original->uuid, new MediaFilter(), ImageSize::of(400, 200))
+        ->variant('large')?->url;
+
+    Carbon::setTestNow(now()->addDays(30));
+
+    // A public disk answers with a redirect to the file itself; what matters
+    // is that the signature is still accepted instead of a 403.
+    $this->get($url)->assertRedirect();
+
+    Carbon::setTestNow();
+});
+
+it('expires a variant address when the shop asks for it', function () {
+    // Permanent is the default, not the only option: images that are private
+    // still need links that stop working.
+    config(['media-kit.variant_url_ttl' => 5]);
+
+    $original = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('big.png', 1000, 500)));
+
+    $url = app(MediaReader::class)
+        ->byUuid($original->uuid, new MediaFilter(), ImageSize::of(400, 200))
+        ->variant('large')?->url;
+
+    expect($url)->toContain('expires=');
+
+    Carbon::setTestNow(now()->addMinutes(10));
+
+    $this->get($url)->assertForbidden();
+
+    Carbon::setTestNow();
+});
+
+it('tells caches a public file may be kept', function () {
+    // Without this every visit re-downloads the same picture, and a CDN in
+    // front of the shop caches nothing at all.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('photo.png', 200, 200)));
+
+    $this->get(route('media-kit.file', ['uuid' => $media->uuid]))
+        ->assertRedirect()
+        ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public');
+});
+
+it('keeps a private file out of shared caches and out of them for long', function () {
+    // A private file is reached through a link that expires, so the answer may
+    // not outlive it: a browser that cached the redirect for a year would keep
+    // following it to an address that stopped working the same day.
+    Storage::fake('secret');
+    config(['filesystems.disks.secret.visibility' => 'private']);
+
+    $media = MediaFile::query()->create([
+        'disk' => 'secret',
+        'path' => 'media/private/' . uniqid() . '.png',
+        'type' => MediaType::Image,
+        'is_public' => false,
+    ]);
+
+    Storage::disk('secret')->put($media->path, 'bytes');
+
+    $this->get(URL::signedRoute('media-kit.file', ['uuid' => $media->uuid]))
+        ->assertHeader('Cache-Control', 'max-age=3600, private');
+});
+
+it('stops advertising a cache lifetime when it is switched off', function () {
+    config(['media-kit.cache_ttl' => 0]);
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('photo.png', 200, 200)));
+
+    $this->get(route('media-kit.file', ['uuid' => $media->uuid]))
+        ->assertRedirect()
+        ->assertHeader('Cache-Control', 'must-revalidate, no-cache, private');
 });
 
 it('reports a public disk as public and a private one as private', function () {
