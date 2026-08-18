@@ -4,6 +4,7 @@ namespace KandySoft\MediaKit\Contracts;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
@@ -60,5 +61,19 @@ interface MediaWriter
     /**
      * Produce the resized rendition if it is missing and return its record.
      */
+    /**
+     * Warm every rendition of everything a model owns, and say how many exist
+     * afterwards.
+     */
+    public function warmForModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): int;
+
+    /**
+     * Produce every rendition of a file up front, so no request has to wait
+     * for one and finished files can be addressed directly.
+     *
+     * @return list<MediaFile>
+     */
+    public function warmVariants(MediaFile $media, ImageSize $size = new ImageSize()): array;
+
     public function ensureVariant(MediaFile $original, int $width, int $height, string $format): MediaFile;
 }

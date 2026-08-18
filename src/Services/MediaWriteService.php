@@ -8,6 +8,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
+use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
@@ -281,6 +282,53 @@ final class MediaWriteService implements MediaWriter
         }
 
         return $this->adopt($path, $disk->name(), MediaFileRepository::FALLBACK_TAG);
+    }
+
+    /**
+     * Warm every rendition of everything a model owns.
+     *
+     * The model-level counterpart of the reader, and the one an indexer wants:
+     * it is walking the catalogue anyway, and warming there is what lets the
+     * pictures on a page be addressed directly the first time anybody opens it.
+     *
+     * @return int  how many renditions exist afterwards
+     */
+    public function warmForModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): int
+    {
+        $warmed = 0;
+
+        foreach ($this->media->forModel($model, $filter) as $file) {
+            $warmed += count($this->warmVariants($file, $size));
+        }
+
+        return $warmed;
+    }
+
+    /**
+     * Produce every rendition of a file up front.
+     *
+     * Generating on first request means somebody waits for it, and on a
+     * catalogue that somebody is usually a search engine reading a page nobody
+     * has opened yet. Warming moves the cost to indexing time, where a few
+     * extra seconds are free, and leaves the address of a finished file behind
+     * — no redirect, no signature, no database lookup between a visitor and a
+     * picture.
+     *
+     * @return list<MediaFile>
+     */
+    public function warmVariants(MediaFile $media, ImageSize $size = new ImageSize()): array
+    {
+        if (! $media->type->isImage()) {
+            return [];
+        }
+
+        $warmed = [];
+
+        foreach ($this->variants->sizesFor($media->width, $media->height, $size) as $variant) {
+            $warmed[] = $this->ensureVariant($media, $variant->width, $variant->height, $variant->format);
+        }
+
+        return $warmed;
     }
 
     public function ensureVariant(MediaFile $original, int $width, int $height, string $format): MediaFile
