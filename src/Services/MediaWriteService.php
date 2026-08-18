@@ -20,6 +20,7 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Storage\MediaDisk;
 use KandySoft\MediaKit\Support\ImageFactory;
+use KandySoft\MediaKit\Support\PlaceholderFactory;
 use Throwable;
 
 final class MediaWriteService implements MediaWriter
@@ -29,6 +30,7 @@ final class MediaWriteService implements MediaWriter
         private readonly MediaStorage $storage,
         private readonly ImageVariantGenerator $variants,
         private readonly ImageFactory $images,
+        private readonly PlaceholderFactory $placeholders,
         private readonly Config $config,
     ) {}
 
@@ -106,6 +108,7 @@ final class MediaWriteService implements MediaWriter
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
+            'placeholder' => $this->placeholderFor($type, $file),
             'size' => $file->getSize() ?: null,
             'position' => 0,
             'is_public' => $mediaDisk->isPublic(),
@@ -154,6 +157,7 @@ final class MediaWriteService implements MediaWriter
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
+            'placeholder' => $this->placeholderFor($type, $file),
             'size' => $file->getSize() ?: null,
             'is_public' => $disk->isPublic(),
         ]);
@@ -197,6 +201,9 @@ final class MediaWriteService implements MediaWriter
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
+            'placeholder' => $type->isImage()
+                ? $this->placeholders->forContents((string) $mediaDisk->get($path))
+                : null,
             'size' => $mediaDisk->size($path),
             'position' => 0,
             'is_public' => $mediaDisk->isPublic(),
@@ -416,6 +423,14 @@ final class MediaWriteService implements MediaWriter
     /**
      * @return array{0: int|null, 1: int|null}
      */
+    /**
+     * A placeholder is only meaningful for something that can be looked at.
+     */
+    private function placeholderFor(MediaType $type, UploadedFile $file): ?string
+    {
+        return $type->isImage() ? $this->placeholders->forUploadedFile($file) : null;
+    }
+
     private function dimensions(MediaType $type, UploadedFile $file): array
     {
         if (! $type->isImage()) {

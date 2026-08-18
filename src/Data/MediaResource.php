@@ -35,6 +35,8 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
         public ?MediaCaption $caption = null,
         public array $variants = [],
         public array $captions = [],
+        /** A tiny copy as a `data:` URI — what is seen while the real one arrives. */
+        public ?string $placeholder = null,
     ) {}
 
     public function aspect(): ?float
@@ -134,6 +136,9 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
             $payload['srcset'] = $srcset;
         }
 
+        if ($this->placeholder !== null) {
+            $payload['placeholder'] = $this->placeholder;
+        }
 
         return $payload;
     }

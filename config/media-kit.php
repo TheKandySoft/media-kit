@@ -116,6 +116,21 @@ return [
             'medium' => 0.6,
             'small' => 0.3,
         ],
+
+        /*
+        | A tiny copy of every image, stored next to it and small enough to
+        | travel inside the page. Until the real file arrives a card has
+        | nothing to show, and that gap is what a visitor reads as slowness.
+        |
+        | Anything larger than 'placeholder_max_bytes' is dropped rather than
+        | shipped: a placeholder that outgrows its purpose is just another
+        | image on the page.
+        */
+        'placeholder' => (bool) env('MEDIA_KIT_PLACEHOLDER', true),
+
+        'placeholder_width' => (int) env('MEDIA_KIT_PLACEHOLDER_WIDTH', 16),
+
+        'placeholder_max_bytes' => (int) env('MEDIA_KIT_PLACEHOLDER_MAX_BYTES', 2048),
     ],
 
     /*

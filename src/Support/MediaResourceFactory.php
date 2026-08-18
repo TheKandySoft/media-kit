@@ -72,6 +72,7 @@ final class MediaResourceFactory
             caption: $this->selectCaption($captions, $filter->captionLocale),
             variants: $media->type->isImage() ? $this->variants($media, $size, $policy) : [],
             captions: $captions,
+            placeholder: $media->placeholder,
         );
     }
 

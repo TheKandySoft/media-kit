@@ -566,3 +566,36 @@ it('has no srcset for something that is not an image', function () {
 
     expect(app(MediaReader::class)->byUuid($media->uuid)->srcset())->toBeNull();
 });
+
+it('keeps a tiny copy of a picture to show while the real one arrives', function () {
+    // Порожня картка, яка заповнюється за мить, — це і є те, що відвідувач
+    // читає як повільність, і те, що міряє показник зсуву розмітки.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    $placeholder = app(MediaReader::class)->byUuid($media->uuid)->placeholder;
+
+    expect($placeholder)->toStartWith('data:image/webp;base64,')
+        ->and(strlen($placeholder))->toBeLessThan(2800);
+});
+
+it('ships the placeholder to the client', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid)->toArray())->toHaveKey('placeholder');
+});
+
+it('does not invent a placeholder for a file nobody looks at', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('manual.pdf', 10, 'application/pdf')));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid)->placeholder)->toBeNull();
+});
+
+it('refuses the upload over nothing when the placeholder cannot be made', function () {
+    // Заглушка — приємність. Відмовити в завантаженні через неї — ні.
+    config(['media-kit.image.placeholder' => false]);
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+
+    expect($media->exists)->toBeTrue()
+        ->and($media->placeholder)->toBeNull();
+});

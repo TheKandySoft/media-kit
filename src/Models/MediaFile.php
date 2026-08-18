@@ -27,6 +27,7 @@ use KandySoft\MediaKit\Enums\MediaType;
  * @property string|null $extension
  * @property int|null $width
  * @property int|null $height
+ * @property string|null $placeholder
  * @property int|null $size
  * @property int $position
  * @property bool $is_public
@@ -57,6 +58,7 @@ class MediaFile extends Model
         'extension',
         'width',
         'height',
+        'placeholder',
         'size',
         'position',
         'is_public',
