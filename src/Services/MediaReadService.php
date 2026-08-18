@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\ImageSize;
+use KandySoft\MediaKit\Data\LinkLifetime;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaResource;
 use KandySoft\MediaKit\Exceptions\MediaNotFound;
@@ -24,7 +25,7 @@ final class MediaReadService implements MediaReader
     /**
      * @return array<int, MediaResource>
      */
-    public function forModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): array
+    public function forModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize(), ?LinkLifetime $lifetime = null): array
     {
         $files = $this->media->forModel($model, $filter)->all();
 
@@ -33,12 +34,12 @@ final class MediaReadService implements MediaReader
         }
 
         return array_map(
-            fn(MediaFile $file): MediaResource => $this->resources->make($file, $filter, $size),
+            fn(MediaFile $file): MediaResource => $this->resources->make($file, $filter, $size, $lifetime),
             $files,
         );
     }
 
-    public function firstForModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): ?MediaResource
+    public function firstForModel(Model $model, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize(), ?LinkLifetime $lifetime = null): ?MediaResource
     {
         $file = $this->media->firstForModel($model, $filter);
 
@@ -46,32 +47,32 @@ final class MediaReadService implements MediaReader
             $file = $this->writer->fallbackImage();
         }
 
-        return $file === null ? null : $this->resources->make($file, $filter, $size);
+        return $file === null ? null : $this->resources->make($file, $filter, $size, $lifetime);
     }
 
-    public function byUuid(string $uuid, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): MediaResource
+    public function byUuid(string $uuid, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize(), ?LinkLifetime $lifetime = null): MediaResource
     {
         $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
 
         $file->loadMissing('captions');
 
-        return $this->resources->make($file, $filter, $size);
+        return $this->resources->make($file, $filter, $size, $lifetime);
     }
 
     /**
      * @return array<int, MediaResource>
      */
-    public function tagged(string $tag, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): array
+    public function tagged(string $tag, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize(), ?LinkLifetime $lifetime = null): array
     {
         return array_map(
-            fn(MediaFile $file): MediaResource => $this->resources->make($file, $filter, $size),
+            fn(MediaFile $file): MediaResource => $this->resources->make($file, $filter, $size, $lifetime),
             $this->media->taggedStandalone($tag, $filter)->all(),
         );
     }
 
-    public function fallbackImage(MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): MediaResource
+    public function fallbackImage(MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize(), ?LinkLifetime $lifetime = null): MediaResource
     {
-        return $this->resources->make($this->writer->fallbackImage(), $filter, $size);
+        return $this->resources->make($this->writer->fallbackImage(), $filter, $size, $lifetime);
     }
 
     /**

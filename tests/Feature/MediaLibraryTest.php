@@ -9,6 +9,7 @@ use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\ImageSize;
+use KandySoft\MediaKit\Data\LinkLifetime;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
@@ -336,6 +337,30 @@ it('lets one disk expire its links while another keeps them forever', function (
 it('leaves a disk nobody configured exactly as it was', function () {
     config(['media-kit.disks.documents' => ['variant_url_ttl' => 15]]);
 
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url)
+        ->not->toContain('expires=');
+});
+
+it('shortens every link of one read when the caller asks, not just some', function () {
+    // Скоротити лише частину означало б віддати прев'ю на чверть години, чиї
+    // мініатюри переживуть його на рік.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+
+    Storage::disk('public')->delete($media->path);
+
+    $resource = app(MediaReader::class)->byUuid(
+        $media->uuid,
+        new MediaFilter(),
+        ImageSize::of(200, 200),
+        LinkLifetime::minutes(15),
+    );
+
+    expect($resource->variant('large')?->url)->toContain('expires=');
+});
+
+it('leaves the disk to decide when nobody overrides it', function () {
     $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
 
     expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url)

@@ -7,6 +7,7 @@ use Illuminate\Routing\UrlGenerator;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\ImageVariant;
+use KandySoft\MediaKit\Data\LinkLifetime;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaPolicy;
@@ -35,10 +36,14 @@ final class MediaResourceFactory
         private readonly UrlGenerator $urls,
     ) {}
 
-    public function make(MediaFile $media, MediaFilter $filter = new MediaFilter(), ImageSize $size = new ImageSize()): MediaResource
-    {
+    public function make(
+        MediaFile $media,
+        MediaFilter $filter = new MediaFilter(),
+        ImageSize $size = new ImageSize(),
+        ?LinkLifetime $lifetime = null,
+    ): MediaResource {
         $captions = $this->captions($media);
-        $policy = $this->storage->disk($media->disk)->policy();
+        $policy = $this->policy($media, $lifetime);
 
         return new MediaResource(
             uuid: $media->uuid,
@@ -77,6 +82,20 @@ final class MediaResourceFactory
                 $policy->temporaryUrlExpiry(),
             )
             : '';
+    }
+
+    /**
+     * The policy this file is handed out under.
+     *
+     * The disk decides, unless the caller asked for something else for this
+     * one read — a preview, an export — in which case the override replaces
+     * the policy rather than sitting beside it.
+     */
+    private function policy(MediaFile $media, ?LinkLifetime $lifetime): MediaPolicy
+    {
+        $policy = $this->storage->disk($media->disk)->policy();
+
+        return $lifetime === null ? $policy : $policy->with($lifetime);
     }
 
     /**

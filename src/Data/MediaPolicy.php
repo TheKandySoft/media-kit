@@ -50,4 +50,19 @@ final readonly class MediaPolicy
             : null;
     }
 
+    /**
+     * The same policy with one caller's lifetime in place of the disk's.
+     *
+     * Both kinds of link move together. Shortening only one of them would
+     * leave the caller holding a fifteen-minute preview whose thumbnails
+     * outlive it by a year.
+     */
+    public function with(LinkLifetime $lifetime): self
+    {
+        if ($lifetime->minutes === null) {
+            return new self($this->public, $this->temporaryUrlTtl, null, $this->cacheTtl);
+        }
+
+        return new self($this->public, $lifetime->minutes, $lifetime->minutes, $this->cacheTtl);
+    }
 }
