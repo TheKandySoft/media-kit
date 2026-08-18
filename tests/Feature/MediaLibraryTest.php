@@ -291,8 +291,8 @@ it('keeps a private file out of shared caches and out of them for long', functio
 
     Storage::disk('secret')->put($media->path, 'bytes');
 
-    $this->get(URL::signedRoute('media-kit.file', ['uuid' => $media->uuid]))
-        ->assertHeader('Cache-Control', 'max-age=3600, private');
+    $this->get(URL::temporarySignedRoute('media-kit.file', now()->addMinutes(15), ['uuid' => $media->uuid]))
+        ->assertHeader('Cache-Control', 'max-age=900, private');
 });
 
 it('stops advertising a cache lifetime when it is switched off', function () {
@@ -365,4 +365,30 @@ it('leaves the disk to decide when nobody overrides it', function () {
 
     expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))->variant('large')?->url)
         ->not->toContain('expires=');
+});
+
+it('never promises a cache longer than the link it describes', function () {
+    // Раніше межу задавав конфіг, і разове коротке посилання могло приїхати з
+    // річним заголовком: заголовок питав одне джерело, посилання — інше.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 200, 200)));
+
+    $this->get(URL::temporarySignedRoute('media-kit.file', now()->addMinutes(5), ['uuid' => $media->uuid]))
+        ->assertHeader('Cache-Control', 'max-age=300, public');
+});
+
+it('does not call a link immutable when it expires', function () {
+    // Публічний диск із увімкненим строком: файл видимий усім, але адреса його
+    // помре, і `immutable` на ній — неправда.
+    config(['media-kit.disks.public' => ['variant_url_ttl' => 5]]);
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
+
+    $url = app(MediaReader::class)
+        ->byUuid($media->uuid, new MediaFilter(), ImageSize::of(200, 200))
+        ->variant('large')?->url;
+
+    $header = $this->get($url)->headers->get('Cache-Control');
+
+    expect($header)->not->toContain('immutable')
+        ->and($header)->toContain('max-age=');
 });
