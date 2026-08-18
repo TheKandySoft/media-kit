@@ -1,20 +1,45 @@
 # Changelog
 
-## 1.0.2
+## 1.1.0
 
-Image links are now stable and cacheable. Both changes matter most to a storefront, where the same
-picture is fetched by browsers, CDNs, image crawlers and product feeds rather than by one logged-in
-user.
+Image links became stable, cacheable and honest. All of it matters most to a storefront, where the
+same picture is fetched by browsers, CDNs, image crawlers and product feeds rather than by one
+logged-in user.
+
+### Links
 
 - **Variant links no longer expire by default.** They were signed with a 24-hour expiry, which meant
-  the address changed on every render: caches never hit, image crawlers found the address dead by the
-  time they came back for it, and a product feed went stale between being built and being read. The
-  signature stays — it is what stops anyone requesting arbitrary sizes and filling the disk — but it
-  is now permanent unless `media-kit.variant_url_ttl` says otherwise, which is what private images
-  still want.
-- **Served files carry cache headers.** A public file is `public, max-age=31536000, immutable`,
-  because a stored file never changes underneath its uuid. A private one is `private` and never
-  outlives the temporary link it redirects to. Tunable through `media-kit.cache_ttl`.
+  the address changed on every render: caches never hit, image crawlers found the address dead by
+  the time they came back for it, and a product feed went stale between being built and being read.
+  The signature stays — it is what stops anyone requesting arbitrary sizes and filling the disk —
+  but it is now permanent unless asked otherwise.
+- **Lifetimes belong to the disk.** They used to be one application-wide number, so "documents
+  expire in a quarter of an hour, catalogue pictures never" was not expressible. Top-level
+  configuration holds the defaults, `disks.<name>` holds the exceptions, and a disk nobody mentions
+  behaves exactly as before. Visibility moved in with them, since it answers the same question.
+- **A single read can override the disk.** `LinkLifetime::minutes(15)` passed to a read shortens
+  that read's links — original and variants together, so a short-lived preview cannot have
+  long-lived thumbnails.
+
+### Cache
+
+- **Served files carry cache headers.** A public file is `public, max-age=31536000, immutable`; a
+  private one is `private` and never outlives the link it redirects to. Tunable through `cache_ttl`.
+- **An answer never outlives its link.** The lifetime is read from the expiry the signed address
+  carries, not from configuration, so the two cannot drift apart — a link deliberately shortened for
+  one caller no longer arrives described by the disk's year-long default, and `immutable` is stated
+  only when there is no expiry at all.
+- **Addresses carry the file's version.** The serving routes are keyed by uuid and `replace()` keeps
+  the uuid deliberately, so the same address used to start returning different bytes while every
+  cache kept the old picture. Replacing now orphans the old address.
+- **Repeat requests get a 304.** A weak `ETag` over uuid and version, for the streamed responses
+  that cannot be cached for long and therefore come back often.
+
+### Notes
+
+- The disk wrapper is no longer memoised, so configuration changed at runtime takes effect.
+- For a public disk the package answers with a redirect, so its cache headers apply to the redirect;
+  the bytes are served by the storage or CDN under their own configuration. See the README.
 
 ## 1.0.1
 

@@ -22,6 +22,43 @@ A disk counts as public when it declares `'visibility' => 'public'`. Public file
 URL from the disk; private files get a temporary one, or a signed route that streams through the
 application when the driver cannot mint temporary URLs.
 
+### Policy per disk
+
+How long a link lives is a property of the disk that stores the file, not of the application. The
+top-level settings are the defaults; `disks` holds the exceptions:
+
+```php
+'temporary_url_ttl' => 60,        // minutes
+'variant_url_ttl'   => null,      // null — the address never expires
+'cache_ttl'         => 31536000,  // seconds
+
+'disks' => [
+    'documents' => [
+        'temporary_url_ttl' => 15,
+        'variant_url_ttl'   => 15,
+        'cache_ttl'         => 900,
+    ],
+],
+```
+
+A disk nobody lists behaves like every other one. Attaching the decision to where a file is stored
+is the point: a scanned document cannot acquire a permanent address by accident, because it is not
+kept where permanent addresses are handed out.
+
+Variant links are signed but do not expire by default. The signature stops anyone requesting
+arbitrary sizes and filling the disk; it is not there to keep the picture secret. An expiry would
+change the address on every render, so browsers and CDNs would re-download bytes they already hold,
+and anything that reads an address once and fetches it later — an image crawler, a product feed, a
+link preview — would find it dead.
+
+### What the package can and cannot cache
+
+Served files carry `Cache-Control`, and an answer never claims to live longer than the signed link
+that produced it. For a **public** disk, though, the package answers with a redirect to the disk's
+own URL, so these headers apply to the redirect: the bytes themselves are served by nginx, S3 or
+the CDN in front of them, under **their** configuration. Set the cache headers there too, or most
+of the benefit stays on the table.
+
 ## Writing
 
 ```php
@@ -67,6 +104,16 @@ $images[0]->variant('medium')?->url;   // signed, generated on first request
 $images[0]->caption?->alt;
 ```
 
+Every read is handed out under the policy of the disk the file lives on. When one caller needs
+something shorter — an admin preview, an export leaving the building — pass a lifetime and it
+replaces the policy for that read, original and variants together:
+
+```php
+use KandySoft\MediaKit\Data\LinkLifetime;
+
+$preview = $reader->byUuid($uuid, size: ImageSize::of(400, 300), lifetime: LinkLifetime::minutes(15));
+```
+
 Reads return `MediaResource` objects, never models or loose arrays. The disk, the path and the
 owning model stay inside the package.
 
@@ -93,7 +140,9 @@ URLs, not in the payloads clients receive.
 | `disk`, `directory` | where files land |
 | `image.driver` | `gd` or `imagick` |
 | `image.variants` | named multipliers of the requested size |
-| `temporary_url_ttl`, `variant_url_ttl` | link lifetimes, in minutes |
+| `temporary_url_ttl`, `variant_url_ttl` | link lifetimes, in minutes; empty means no expiry |
+| `cache_ttl` | how long a served answer may be reused, in seconds |
+| `disks` | per-disk overrides of the three above |
 | `routes.enabled`, `routes.prefix`, `routes.middleware` | serving endpoints, or none at all |
 
 ## Commands
