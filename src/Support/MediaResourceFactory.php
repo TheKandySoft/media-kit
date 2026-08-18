@@ -12,8 +12,11 @@ use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaPolicy;
 use KandySoft\MediaKit\Data\MediaResource;
+use KandySoft\MediaKit\Data\VariantSize;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Models\MediaFileTranslation;
+use KandySoft\MediaKit\Services\ImageVariantGenerator;
+use KandySoft\MediaKit\Storage\MediaDisk;
 
 /**
  * Turns a stored file into the DTO callers receive.
@@ -30,6 +33,12 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
  * Lifetimes are not read from configuration here. They come from the disk the
  * file lives on, so the link and the cache header that describes it can never
  * be minted from two different numbers.
+ *
+ * A rendition that has already been produced is addressed directly on the
+ * disk. Only one that does not exist yet needs the on-demand endpoint, and
+ * with it a redirect, a signature check and a database lookup on the way to a
+ * static file. An application that warms its renditions therefore never sends
+ * a visitor through the application to fetch a picture at all.
  */
 final class MediaResourceFactory
 {
@@ -37,6 +46,7 @@ final class MediaResourceFactory
         private readonly MediaStorage $storage,
         private readonly Config $config,
         private readonly UrlGenerator $urls,
+        private readonly ImageVariantGenerator $variants,
     ) {}
 
     public function make(
@@ -120,38 +130,71 @@ final class MediaResourceFactory
      */
     private function variants(MediaFile $media, ImageSize $size, MediaPolicy $policy): array
     {
-        if (! $this->routesEnabled()) {
-            return [];
-        }
-
-        [$width, $height] = $size->resolve(
-            $media->width,
-            $media->height,
-            (int) $this->config->get('media-kit.image.default_width', 300),
-            (int) $this->config->get('media-kit.image.default_height', 300),
-        );
-
-        $format = $size->format ?? (string) $this->config->get('media-kit.image.format', 'webp');
+        $disk = $this->storage->disk($media->disk);
         $variants = [];
 
-        foreach ($this->config->get('media-kit.image.variants', []) as $name => $multiplier) {
-            $variantWidth = max(1, (int) round($width * (float) $multiplier));
-            $variantHeight = max(1, (int) round($height * (float) $multiplier));
+        foreach ($this->variants->sizesFor($media->width, $media->height, $size) as $variant) {
+            $url = $this->variantUrl($media, $variant, $policy, $disk);
 
-            $variants[$name] = new ImageVariant(
-                width: $variantWidth,
-                height: $variantHeight,
-                url: $this->urls->signedRoute('media-kit.variant', [
-                    'uuid' => $media->uuid,
-                    'width' => $variantWidth,
-                    'height' => $variantHeight,
-                    'format' => $format,
-                    'v' => $this->version($media),
-                ], $policy->variantUrlExpiry()),
+            if ($url === null) {
+                continue;
+            }
+
+            $variants[$variant->name] = new ImageVariant(
+                width: $variant->width,
+                height: $variant->height,
+                url: $url,
             );
         }
 
         return $variants;
+    }
+
+    /**
+     * The address of one rendition: the file itself when it exists, the
+     * endpoint that would create it when it does not.
+     *
+     * Existence is answered from the recorded variants rather than by asking
+     * the disk. A listing describes dozens of pictures at three sizes each, and
+     * a `stat` per rendition would be dozens of round trips to object storage
+     * for a question the database already holds the answer to.
+     */
+    private function variantUrl(
+        MediaFile $media,
+        VariantSize $variant,
+        MediaPolicy $policy,
+        MediaDisk $disk,
+    ): ?string {
+        if ($policy->public) {
+            $existing = $this->storedVariant($media, $variant);
+
+            // The path already contains the original's name, and replacing a
+            // file gives it a new one, so this address needs no version of its
+            // own: a replaced picture simply lives somewhere else.
+            if ($existing !== null && ($url = $disk->url($existing->path)) !== null) {
+                return $url;
+            }
+        }
+
+        if (! $this->routesEnabled()) {
+            return null;
+        }
+
+        return $this->urls->signedRoute('media-kit.variant', [
+            'uuid' => $media->uuid,
+            'width' => $variant->width,
+            'height' => $variant->height,
+            'format' => $variant->format,
+            'v' => $this->version($media),
+        ], $policy->variantUrlExpiry());
+    }
+
+    private function storedVariant(MediaFile $media, VariantSize $variant): ?MediaFile
+    {
+        return $media->variants
+            ->first(fn(MediaFile $stored): bool => $stored->width === $variant->width
+                && $stored->height === $variant->height
+                && $stored->extension === $variant->format);
     }
 
     /**

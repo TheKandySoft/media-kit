@@ -434,3 +434,104 @@ it('answers a repeat request for an unchanged file in a few bytes', function () 
 
     $this->get($url, ['If-None-Match' => $etag])->assertStatus(304);
 });
+
+it('addresses a warmed rendition on the disk, not through the application', function () {
+    // Заради цього все й робилося: доти адреса варіанта вела в застосунок, і той
+    // відповідав редиректом — тобто на кожну картинку каталогу припадало
+    // пробудження PHP і запит у базу заради статичного файлу.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    $before = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->variant('large')?->url;
+
+    expect($before)->toContain("/media/{$media->uuid}/")->toContain('signature=');
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    $after = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->variant('large')?->url;
+
+    expect($after)->not->toContain("/media/{$media->uuid}/")
+        ->and($after)->not->toContain('signature=')
+        ->and($after)->toContain('/storage/')
+        ->and($after)->toContain('/variants/400x200/');
+});
+
+it('warms every size it describes, not just the largest', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    $resource = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200));
+
+    foreach (['large', 'medium', 'small'] as $name) {
+        expect($resource->variant($name)?->url)->not->toContain('signature=');
+    }
+});
+
+it('does not produce the same rendition twice', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    expect($media->variants()->count())->toBe(3);
+});
+
+it('keeps a private rendition behind the application even when warmed', function () {
+    // Пряма адреса на приватному диску — це тимчасове посилання зі своїм
+    // строком, тобто політика диска обходиться стороною. Такий файл лишається
+    // за роутом.
+    Storage::fake('secret');
+    config(['filesystems.disks.secret.visibility' => 'private']);
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)),
+        null,
+        'secret',
+    );
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->variant('large')?->url)
+        ->toContain("/media/{$media->uuid}/");
+});
+
+it('moves a warmed rendition when the picture behind it is replaced', function () {
+    // Шлях варіанта рахується з імені оригіналу, а `replace` дає файлу нове —
+    // тож пряма адреса змінюється сама, без версії в запиті.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('before.png', 1000, 500)));
+
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+    $before = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->variant('large')?->url;
+
+    app(MediaWriter::class)->replace($media->uuid, UploadedFile::fake()->image('after.png', 1000, 500));
+    app(MediaWriter::class)->warmVariants($media->fresh(), ImageSize::of(400, 200));
+    $after = app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->variant('large')?->url;
+
+    expect($after)->not->toBe($before)
+        ->and($after)->not->toContain('signature=');
+});
+
+it('ignores a request to warm something that is not an image', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('manual.pdf', 10, 'application/pdf')));
+
+    expect(app(MediaWriter::class)->warmVariants($media))->toBe([]);
+});
+
+it('warms everything a model owns in one call', function () {
+    // Індексатор і так обходить каталог: там прогрів безкоштовний, а на першому
+    // показі сторінки — ні.
+    $product = owner();
+
+    app(MediaWriter::class)->sync($product, [
+        MediaUpload::file(UploadedFile::fake()->image('one.png', 800, 400)),
+        MediaUpload::file(UploadedFile::fake()->image('two.png', 800, 400)),
+    ]);
+
+    $warmed = app(MediaWriter::class)->warmForModel($product, MediaFilter::images(), ImageSize::of(400, 200));
+
+    expect($warmed)->toBe(6);
+
+    foreach (app(MediaReader::class)->forModel($product, MediaFilter::images(), ImageSize::of(400, 200)) as $resource) {
+        expect($resource->variant('large')?->url)->not->toContain('signature=');
+    }
+});

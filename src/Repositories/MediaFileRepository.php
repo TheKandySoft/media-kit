@@ -110,11 +110,17 @@ class MediaFileRepository
      */
     private function applyFilter(Builder $query, MediaFilter $filter): Builder
     {
-        $query->with(['captions' => function ($relation) use ($filter): void {
-            if ($filter->captionLocale !== null) {
-                $relation->where('locale', $filter->captionLocale);
-            }
-        }]);
+        // Variants come along because describing a picture asks which of its
+        // renditions already exist. A listing shows dozens of them, and left to
+        // lazy loading that is one query per picture.
+        $query->with([
+            'variants',
+            'captions' => function ($relation) use ($filter): void {
+                if ($filter->captionLocale !== null) {
+                    $relation->where('locale', $filter->captionLocale);
+                }
+            },
+        ]);
 
         if ($filter->types !== []) {
             $query->whereIn('type', $filter->typeValues());

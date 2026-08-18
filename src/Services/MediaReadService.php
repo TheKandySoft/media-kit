@@ -54,7 +54,7 @@ final class MediaReadService implements MediaReader
     {
         $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
 
-        $file->loadMissing('captions');
+        $file->loadMissing(['captions', 'variants']);
 
         return $this->resources->make($file, $filter, $size, $lifetime);
     }
