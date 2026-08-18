@@ -50,6 +50,37 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
     }
 
     /**
+     * The renditions as a `srcset`, widest last.
+     *
+     * Without this every device downloads the same picture, and the one that
+     * suffers is the phone: it pulls a 700-pixel image to paint it 210 wide,
+     * over the connection least able to afford it. The browser picks from this
+     * list on its own — the only thing it needs is to be told the list exists.
+     */
+    public function srcset(): ?string
+    {
+        if ($this->variants === []) {
+            return null;
+        }
+
+        $sources = [];
+
+        foreach ($this->variants as $variant) {
+            // Keyed by width: two renditions of the same width give the
+            // browser nothing to choose between, while looking like a choice.
+            $sources[$variant->width] = sprintf('%s %dw', $variant->url, $variant->width);
+        }
+
+        if (count($sources) < 2) {
+            return null;
+        }
+
+        ksort($sources);
+
+        return implode(', ', $sources);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array
@@ -98,6 +129,11 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
                 $this->variants,
             );
         }
+
+        if (($srcset = $this->srcset()) !== null) {
+            $payload['srcset'] = $srcset;
+        }
+
 
         return $payload;
     }

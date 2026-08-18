@@ -535,3 +535,34 @@ it('warms everything a model owns in one call', function () {
         expect($resource->variant('large')?->url)->not->toContain('signature=');
     }
 });
+
+it('offers the renditions as a srcset, narrowest first', function () {
+    // Без нього телефон тягне ту саму картинку, що й десктоп: 700 пікселів,
+    // щоб намалювати 210, по найгіршому з'єднанню.
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    $srcset = app(MediaReader::class)
+        ->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))
+        ->srcset();
+
+    // Порядок важливий: браузер читає список як зростання ширини.
+    expect(strpos($srcset, '120w'))->toBeLessThan(strpos($srcset, '240w'))
+        ->and(strpos($srcset, '240w'))->toBeLessThan(strpos($srcset, '400w'))
+        ->and(substr_count($srcset, 'w,') + 1)->toBe(3);
+});
+
+it('does not offer a choice of one', function () {
+    // Список з одного розміру — не вибір, а зайвий атрибут у розмітці.
+    config(['media-kit.image.variants' => ['large' => 1.0]]);
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 1000, 500)));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid, new MediaFilter(), ImageSize::of(400, 200))->srcset())
+        ->toBeNull();
+});
+
+it('has no srcset for something that is not an image', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('manual.pdf', 10, 'application/pdf')));
+
+    expect(app(MediaReader::class)->byUuid($media->uuid)->srcset())->toBeNull();
+});
