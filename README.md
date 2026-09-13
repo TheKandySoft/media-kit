@@ -108,6 +108,12 @@ Replacing keeps the UUID, so links and stored references survive:
 $this->media->replace($logo->uuid, $request->file('logo'));
 ```
 
+Captions change without the file:
+
+```php
+$this->media->caption($logo->uuid, [new MediaCaption('uk', alt: 'Логотип', title: 'Бренд')]);
+```
+
 ## Reading
 
 ```php
@@ -173,6 +179,8 @@ URLs, not in the payloads clients receive.
 | `cache_ttl` | how long a served answer may be reused, in seconds |
 | `disks` | per-disk overrides of the three above |
 | `routes.enabled`, `routes.prefix`, `routes.middleware` | serving endpoints, or none at all |
+| `routes.url` | the root links start at, when a proxy rewrites the address — see [storage](docs/storage.md#behind-a-proxy) |
+| `types` | extensions accepted on top of the built-in ones, per type |
 
 ## Commands
 

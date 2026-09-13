@@ -14,6 +14,7 @@ use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaType;
+use KandySoft\MediaKit\Exceptions\MediaNotFound;
 use KandySoft\MediaKit\Exceptions\UnsupportedFileType;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
@@ -692,4 +693,168 @@ it('does not stop on a file it cannot read', function () {
 
     expect($intact->fresh()->placeholder)->not->toBeNull()
         ->and($broken->fresh()->placeholder)->toBeNull();
+});
+
+it('accepts an extension the host adds to a type', function () {
+    // An accounting system receives XML declarations and CSV statements; a list
+    // written for a shop refused both.
+    config(['media-kit.types' => ['document' => ['xml', '.CSV']]]);
+
+    $xml = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('declaration.xml', 4, 'application/xml')));
+    $csv = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('statement.csv', 4, 'text/csv')));
+
+    expect($xml->type)->toBe(MediaType::Document)
+        ->and($csv->type)->toBe(MediaType::Document);
+});
+
+it('still refuses an extension nobody added', function () {
+    config(['media-kit.types' => ['document' => ['xml']]]);
+
+    app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->create('tool.exe', 4)));
+})->throws(UnsupportedFileType::class);
+
+function privateVault(): void
+{
+    // A real local disk: the faked one mints temporary URLs of its own, which
+    // would step around the serving route this is about.
+    config([
+        'filesystems.disks.vault' => [
+            'driver' => 'local',
+            'root' => storage_path('framework/testing/vault'),
+            'visibility' => 'private',
+        ],
+    ]);
+
+    Storage::disk('vault')->deleteDirectory('media');
+}
+
+it('signs links over the path alone when they start at a configured root', function () {
+    // Behind a proxy that forwards /api/media/* to /media/*, the address that
+    // arrives is not the one that was signed; an absolute signature fails there.
+    privateVault();
+    config(['media-kit.routes.url' => '/api/media/']);
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->create('contract.pdf', 4, 'application/pdf')),
+        null,
+        'vault',
+    );
+
+    $url = app(MediaReader::class)->byUuid($media->uuid)->url;
+
+    expect($url)->toStartWith("/api/media/media/{$media->uuid}?")
+        ->and($url)->toContain('signature=');
+
+    // What the proxy hands on: the same link without its own prefix.
+    $this->get(substr($url, strlen('/api/media')))->assertOk();
+});
+
+it('refuses a link that starts at a root when its signature was tampered with', function () {
+    privateVault();
+    config(['media-kit.routes.url' => '/api/media']);
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->create('contract.pdf', 4, 'application/pdf')),
+        null,
+        'vault',
+    );
+
+    $url = substr(app(MediaReader::class)->byUuid($media->uuid)->url, strlen('/api/media'));
+
+    $this->get(preg_replace('/signature=[a-f0-9]+/', 'signature=' . str_repeat('0', 64), $url))->assertForbidden();
+});
+
+it('keeps absolute links when no root is configured', function () {
+    privateVault();
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->create('contract.pdf', 4, 'application/pdf')),
+        null,
+        'vault',
+    );
+
+    $url = app(MediaReader::class)->byUuid($media->uuid)->url;
+
+    expect($url)->toStartWith('http://localhost/media/');
+
+    $this->get($url)->assertOk();
+});
+
+it('rewrites captions without touching the file or its address', function () {
+    $media = app(MediaWriter::class)->store(MediaUpload::file(
+        UploadedFile::fake()->image('front.png', 200, 200),
+        captions: [new MediaCaption('uk', alt: 'Спереду', title: 'Фасад'), new MediaCaption('en', alt: 'Front')],
+    ));
+
+    $before = app(MediaReader::class)->byUuid($media->uuid);
+
+    Carbon::setTestNow(now()->addMinute());
+
+    $captioned = app(MediaWriter::class)->caption($media->uuid, [
+        new MediaCaption('uk', alt: 'Вигляд спереду', title: 'Фасад'),
+        new MediaCaption('en'),
+    ]);
+
+    $after = app(MediaReader::class)->byUuid($media->uuid);
+
+    expect($captioned->captions->pluck('alt', 'locale')->all())->toBe(['uk' => 'Вигляд спереду'])
+        ->and($after->captions)->toHaveKeys(['uk'])
+        ->and($after->captions)->not->toHaveKey('en')
+        ->and($after->url)->toBe($before->url)
+        ->and($after->variant('large')?->url)->toBe($before->variant('large')?->url);
+
+    Carbon::setTestNow();
+});
+
+it('cannot caption a file that does not exist', function () {
+    app(MediaWriter::class)->caption('00000000-0000-4000-8000-000000000000', [new MediaCaption('uk', alt: 'x')]);
+})->throws(MediaNotFound::class);
+
+function uploadedWithContent(string $name, string $claimedType, string $content): UploadedFile
+{
+    // The testing fake reports a type from the file name, which is the very
+    // claim this is about; a real upload reads the bytes.
+    $path = tempnam(sys_get_temp_dir(), 'media-kit');
+    file_put_contents($path, $content);
+
+    return new UploadedFile($path, $name, $claimedType, null, true);
+}
+
+it('records the type the bytes have, not the one the client claimed', function () {
+    // A page renamed to invoice.pdf and sent as application/pdf used to be
+    // stored — and served back — as a PDF.
+    $page = uploadedWithContent('invoice.pdf', 'application/pdf', '<!doctype html><html><body><script>alert(1)</script></body></html>');
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file($page));
+
+    expect($media->mime_type)->toBe('text/html');
+});
+
+it('hands active content out as a download, never in place', function () {
+    privateVault();
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(uploadedWithContent('notes.txt', 'text/plain', '<!doctype html><html><script>alert(1)</script></html>')),
+        null,
+        'vault',
+    );
+
+    $this->get(app(MediaReader::class)->byUuid($media->uuid)->url)
+        ->assertOk()
+        ->assertHeader('X-Content-Type-Options', 'nosniff')
+        ->assertHeader('Content-Disposition', 'attachment; filename="notes.txt"');
+});
+
+it('shows a harmless file in place', function () {
+    privateVault();
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->image('scan.png', 40, 40)),
+        null,
+        'vault',
+    );
+
+    $this->get(app(MediaReader::class)->byUuid($media->uuid)->url)
+        ->assertOk()
+        ->assertHeader('Content-Type', 'image/png')
+        ->assertHeader('Content-Disposition', 'inline; filename="scan.png"');
 });

@@ -18,6 +18,8 @@ use KandySoft\MediaKit\Services\MediaWriteService;
 use KandySoft\MediaKit\Storage\MediaStorageManager;
 use KandySoft\MediaKit\Support\ImageFactory;
 use KandySoft\MediaKit\Support\MediaResourceFactory;
+use KandySoft\MediaKit\Support\MediaTypeResolver;
+use KandySoft\MediaKit\Support\SignedLinks;
 
 class MediaKitServiceProvider extends ServiceProvider
 {
@@ -33,7 +35,9 @@ class MediaKitServiceProvider extends ServiceProvider
 
         $this->app->singleton(MediaFileRepository::class);
         $this->app->singleton(ImageFactory::class);
+        $this->app->singleton(MediaTypeResolver::class);
         $this->app->singleton(ImageVariantGenerator::class);
+        $this->app->singleton(SignedLinks::class);
         $this->app->singleton(MediaResourceFactory::class);
 
         $this->app->singleton(MediaWriteService::class);

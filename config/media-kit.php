@@ -135,6 +135,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Extra extensions
+    |--------------------------------------------------------------------------
+    |
+    | The package knows the usual extensions of every type; this is where the
+    | host adds its own. Keys are type names (image, video, document, audio,
+    | archive, vector), values are the extensions to accept on top:
+    |
+    |   'document' => ['xml', 'csv', 'odt', 'ods', 'rtf', 'p7s'],
+    |
+    | Extensions are added, never moved: a built-in one keeps its type. Adding
+    | an extension to `image` makes the package try to read dimensions and
+    | produce variants from it, so only list formats the image driver decodes.
+    |
+    */
+
+    'types' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Fallback image
     |--------------------------------------------------------------------------
     |
@@ -161,5 +180,21 @@ return [
         'prefix' => env('MEDIA_KIT_ROUTE_PREFIX', 'media'),
 
         'middleware' => [],
+
+        /*
+        | Where the links start, as the client reaches the application.
+        |
+        | Empty: links are absolute and signed over the whole address, host
+        | included — right when the application answers on the address its
+        | links carry.
+        |
+        | Set it when something rewrites the address on the way in, such as a
+        | proxy that forwards /api/media/* to this application's /media/*:
+        | links are then signed over path and query only and this root is put
+        | in front of them, so the signature still matches what arrives.
+        |
+        |   'url' => '/api/media',
+        */
+        'url' => env('MEDIA_KIT_ROUTE_URL'),
     ],
 ];

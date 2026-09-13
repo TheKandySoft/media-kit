@@ -3,7 +3,6 @@
 namespace KandySoft\MediaKit\Support;
 
 use Illuminate\Contracts\Config\Repository as Config;
-use Illuminate\Routing\UrlGenerator;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\ImageVariant;
@@ -45,7 +44,7 @@ final class MediaResourceFactory
     public function __construct(
         private readonly MediaStorage $storage,
         private readonly Config $config,
-        private readonly UrlGenerator $urls,
+        private readonly SignedLinks $links,
         private readonly ImageVariantGenerator $variants,
     ) {}
 
@@ -90,7 +89,7 @@ final class MediaResourceFactory
         }
 
         return $this->routesEnabled()
-            ? $this->urls->signedRoute(
+            ? $this->links->sign(
                 'media-kit.file',
                 ['uuid' => $media->uuid, 'v' => $this->version($media)],
                 $policy->temporaryUrlExpiry(),
@@ -181,7 +180,7 @@ final class MediaResourceFactory
             return null;
         }
 
-        return $this->urls->signedRoute('media-kit.variant', [
+        return $this->links->sign('media-kit.variant', [
             'uuid' => $media->uuid,
             'width' => $variant->width,
             'height' => $variant->height,

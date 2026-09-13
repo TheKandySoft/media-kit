@@ -78,6 +78,29 @@ Set `media-kit.routes.enabled` to `false` to register none of them and serve med
 controllers. Note that variant links need the routes: with them disabled, `MediaResource::variants`
 comes back empty.
 
+## Behind a proxy
+
+Links are absolute by default and signed over the whole address, host included. That breaks as soon
+as something rewrites the address between the client and the application — a backend-for-frontend
+forwarding `/api/media/*` to the service's own `/media/*`, or a gateway in front of an internal
+hostname: the request that arrives is not the one that was signed, and every link answers 403.
+
+Give the links a root instead:
+
+```dotenv
+MEDIA_KIT_ROUTE_URL=/api/media
+```
+
+Links are then signed over path and query only, and the root is put in front of them:
+
+```text
+/api/media/media/9b1c…?expires=…&signature=…     what the client receives
+          /media/9b1c…?expires=…&signature=…     what the proxy hands on — still valid
+```
+
+The root can be a full address too (`https://files.example.com`). Links a disk mints itself — a
+public URL, an S3 pre-signed one — are the disk's own and are not touched.
+
 ## Adopting existing files
 
 Files copied onto a disk out of band can be registered afterwards:

@@ -52,6 +52,20 @@ $writer->replace($logo->uuid, $request->file('logo'));
 The old file and every variant generated from it are removed. The replacement is written first, so
 a failure leaves the original in place rather than a record pointing at nothing.
 
+## Captions
+
+`caption()` rewrites alt and title for the locales it is given and leaves the file alone. A caption
+with neither removes its locale:
+
+```php
+$writer->caption($image->uuid, [
+    new MediaCaption('uk', alt: 'Вигляд спереду', title: 'Фасад'),
+    new MediaCaption('en'),            // drops the English caption
+]);
+```
+
+The address does not change — the bytes behind it did not.
+
 ## Reading
 
 ```php
@@ -136,6 +150,22 @@ MediaDisks::disk('s3')->exists($path);
 
 Injecting `MediaReader`, `MediaWriter` or `MediaStorage` is equivalent and preferable in code you
 intend to test.
+
+## Accepting more extensions
+
+The built-in list covers the usual pictures, videos, documents, sounds and archives. Anything else
+is refused with `UnsupportedFileType` until the host adds it to a type:
+
+```php
+// config/media-kit.php
+'types' => [
+    'document' => ['xml', 'csv', 'odt', 'ods', 'rtf', 'p7s'],
+],
+```
+
+Extensions are added, never moved: `png` stays an image even when listed under `document`. Adding
+one to `image` makes the package read dimensions and produce variants from it, so list only formats
+the image driver decodes.
 
 ## Errors
 

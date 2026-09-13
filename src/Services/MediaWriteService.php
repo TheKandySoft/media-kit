@@ -20,6 +20,7 @@ use KandySoft\MediaKit\Models\MediaFileTranslation;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Storage\MediaDisk;
 use KandySoft\MediaKit\Support\ImageFactory;
+use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\PlaceholderFactory;
 use Throwable;
 
@@ -31,6 +32,7 @@ final class MediaWriteService implements MediaWriter
         private readonly ImageVariantGenerator $variants,
         private readonly ImageFactory $images,
         private readonly PlaceholderFactory $placeholders,
+        private readonly MediaTypeResolver $types,
         private readonly Config $config,
     ) {}
 
@@ -87,7 +89,7 @@ final class MediaWriteService implements MediaWriter
 
         $mediaDisk = $this->storage->disk($disk);
         $extension = strtolower($file->getClientOriginalExtension());
-        $type = MediaType::fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
+        $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
         $path = $mediaDisk->upload(
             $file,
@@ -104,7 +106,7 @@ final class MediaWriteService implements MediaWriter
             'path' => $path,
             'original_name' => $file->getClientOriginalName(),
             'type' => $type,
-            'mime_type' => $file->getClientMimeType(),
+            'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
@@ -131,7 +133,7 @@ final class MediaWriteService implements MediaWriter
 
         $disk = $this->storage->disk($existing->disk);
         $extension = strtolower($file->getClientOriginalExtension());
-        $type = MediaType::fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
+        $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
         // Write the replacement before touching the old one: a failure here
         // leaves the original in place rather than a record pointing at nothing.
@@ -153,7 +155,7 @@ final class MediaWriteService implements MediaWriter
             'path' => $path,
             'original_name' => $file->getClientOriginalName(),
             'type' => $type,
-            'mime_type' => $file->getClientMimeType(),
+            'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
@@ -173,6 +175,29 @@ final class MediaWriteService implements MediaWriter
         return $existing->refresh();
     }
 
+    /**
+     * @param  array<int, MediaCaption>  $captions
+     */
+    public function caption(string $uuid, array $captions): MediaFile
+    {
+        $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
+
+        foreach ($captions as $caption) {
+            if ($caption->isEmpty()) {
+                MediaFileTranslation::query()
+                    ->where('media_file_uuid', $file->uuid)
+                    ->where('locale', $caption->locale)
+                    ->delete();
+
+                continue;
+            }
+
+            $this->writeCaptions($file, [$caption]);
+        }
+
+        return $file->load('captions');
+    }
+
     public function adopt(string $path, ?string $disk = null, ?string $tag = null): MediaFile
     {
         $mediaDisk = $this->storage->disk($disk);
@@ -188,7 +213,7 @@ final class MediaWriteService implements MediaWriter
         }
 
         $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        $type = MediaType::fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
+        $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
         [$width, $height] = $this->dimensionsFromDisk($type, $mediaDisk, $path);
 
@@ -423,6 +448,26 @@ final class MediaWriteService implements MediaWriter
     /**
      * @return array{0: int|null, 1: int|null}
      */
+    /**
+     * The type the bytes actually have, not the one the client claimed.
+     *
+     * The stored type is what the file is later served with, and the browser's
+     * claim is whatever the uploader wanted it to be: a page renamed to
+     * `invoice.pdf` and sent as `application/pdf` would otherwise come back out
+     * as a PDF that is really HTML. The claim is only kept when the content
+     * cannot be identified at all.
+     */
+    private function mimeTypeOf(UploadedFile $file): ?string
+    {
+        try {
+            $detected = $file->getMimeType();
+        } catch (Throwable) {
+            $detected = null;
+        }
+
+        return $detected ?: ($file->getClientMimeType() ?: null);
+    }
+
     /**
      * A placeholder is only meaningful for something that can be looked at.
      */

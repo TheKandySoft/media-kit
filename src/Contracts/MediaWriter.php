@@ -40,6 +40,19 @@ interface MediaWriter
     public function replace(string $uuid, UploadedFile $file, array $captions = []): MediaFile;
 
     /**
+     * Rewrite the captions of a stored file, leaving the file itself alone.
+     *
+     * Only the locales given are touched; a caption with neither alt nor title
+     * removes that locale. The address of the file does not change, because
+     * the bytes behind it did not.
+     *
+     * @param  array<int, MediaCaption>  $captions
+     *
+     * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
+     */
+    public function caption(string $uuid, array $captions): MediaFile;
+
+    /**
      * Register a file that is already sitting on a disk.
      */
     public function adopt(string $path, ?string $disk = null, ?string $tag = null): MediaFile;
@@ -59,9 +72,6 @@ interface MediaWriter
     public function fallbackImage(): MediaFile;
 
     /**
-     * Produce the resized rendition if it is missing and return its record.
-     */
-    /**
      * Warm every rendition of everything a model owns, and say how many exist
      * afterwards.
      */
@@ -75,5 +85,8 @@ interface MediaWriter
      */
     public function warmVariants(MediaFile $media, ImageSize $size = new ImageSize()): array;
 
+    /**
+     * Produce the resized rendition if it is missing and return its record.
+     */
     public function ensureVariant(MediaFile $original, int $width, int $height, string $format): MediaFile;
 }

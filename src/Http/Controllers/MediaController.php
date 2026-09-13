@@ -8,6 +8,7 @@ use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
+use KandySoft\MediaKit\Support\SignedLinks;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -20,10 +21,26 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class MediaController extends Controller
 {
+    /**
+     * Types a browser executes rather than displays.
+     *
+     * @var array<int, string>
+     */
+    private const array ACTIVE_CONTENT = [
+        'text/html',
+        'application/xhtml+xml',
+        'image/svg+xml',
+        'text/xml',
+        'application/xml',
+        'text/javascript',
+        'application/javascript',
+    ];
+
     public function __construct(
         private readonly MediaFileRepository $media,
         private readonly MediaStorage $storage,
         private readonly MediaWriter $writer,
+        private readonly SignedLinks $links,
     ) {}
 
     public function show(Request $request, string $uuid): Response
@@ -46,7 +63,7 @@ class MediaController extends Controller
 
     public function variant(Request $request, string $uuid, int $width, int $height, string $format): Response
     {
-        abort_unless($request->hasValidSignature(), 403, 'Invalid or expired signature.');
+        abort_unless($this->links->verify($request), 403, 'Invalid or expired signature.');
 
         $variant = $this->writer->ensureVariant($this->find($uuid), $width, $height, $format);
 
@@ -63,7 +80,7 @@ class MediaController extends Controller
      */
     private function guard(Request $request, MediaFile $media): void
     {
-        abort_unless($media->is_public || $request->hasValidSignature(), 403, 'Invalid or expired signature.');
+        abort_unless($media->is_public || $this->links->verify($request), 403, 'Invalid or expired signature.');
     }
 
     private function serve(Request $request, MediaFile $media, string $disposition = 'inline'): Response
@@ -89,6 +106,13 @@ class MediaController extends Controller
         }
 
         $filename = $media->original_name ?? basename($media->path);
+        $mimeType = $media->mime_type ?? 'application/octet-stream';
+
+        // Content a browser would run is never shown in place: opened from the
+        // application's own origin it would run with the application's rights.
+        if (in_array(strtolower($mimeType), self::ACTIVE_CONTENT, true)) {
+            $disposition = 'attachment';
+        }
 
         return new StreamedResponse(
             function () use ($disk, $media): void {
@@ -98,7 +122,10 @@ class MediaController extends Controller
             },
             200,
             [
-                'Content-Type' => $media->mime_type ?? 'application/octet-stream',
+                'Content-Type' => $mimeType,
+                // Without it a browser second-guesses the type from the bytes,
+                // which is exactly what the check above is there to prevent.
+                'X-Content-Type-Options' => 'nosniff',
                 'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, addslashes($filename)),
                 'Content-Length' => (string) ($media->size ?? $disk->size($media->path) ?? 0),
             ] + $headers,

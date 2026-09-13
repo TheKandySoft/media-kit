@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.5.0
+
+What an application needs to run the package as a service of its own — behind a proxy, on the
+framework version it already has, accepting the files its users actually send.
+
+- **Laravel 12 and PHP 8.3.** The code never needed Laravel 13 or PHP 8.4; the constraints did,
+  and they kept the package out of every application a major version behind. The suite runs on
+  both (PHP 8.3 and 8.4, Laravel 12 and 13, lowest and stable dependencies).
+- **Links that survive a proxy.** A link was absolute and signed over the whole address, so
+  anything that rewrote the address on the way in — a backend-for-frontend forwarding
+  `/api/media/*` to the service's `/media/*`, a gateway in front of an internal hostname — turned
+  every link into a 403. `routes.url` signs the path and query only and puts the configured root
+  in front of the link. Left empty, nothing changes.
+- **Extensions the host adds.** The list of accepted extensions was written for a catalogue, so an
+  XML declaration, a CSV statement or a detached `.p7s` signature was refused as unsupported.
+  `types` adds extensions to a type; a built-in extension keeps its type, so configuration cannot
+  switch a picture's variants off by listing it elsewhere.
+- **`MediaWriter::caption()`** rewrites alt and title without replacing the file. The only way to
+  change a caption was `replace()` with the same bytes, or a `sync()` of a model the file may not
+  have. The file's address stays the same, because the bytes behind it did.
+
+### Security
+
+- **The stored type is the one the bytes have.** An upload was recorded with the type the client
+  claimed and served back with it, so a page renamed to `invoice.pdf` and sent as `application/pdf`
+  came back out as a "PDF" that was really HTML. The type is now read from the content; the claim
+  is kept only when the content cannot be identified.
+- **Active content is never shown in place.** A streamed file of a type a browser executes — HTML,
+  XHTML, SVG, XML, JavaScript — is sent as an attachment, and every streamed file carries
+  `X-Content-Type-Options: nosniff`. Opened from the application's own origin such a file would run
+  with the application's rights. An `<img>` still renders an SVG sent this way.
+
+`MediaWriter` gains a method: an application implementing the contract itself has to add it.
+
 ## 1.4.0
 
 - **`media:placeholders`** fills in placeholders for images stored before 1.3.0 kept them. Without
