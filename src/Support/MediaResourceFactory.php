@@ -82,7 +82,9 @@ final class MediaResourceFactory
      */
     private function url(MediaFile $media, MediaPolicy $policy): string
     {
-        $url = $this->storage->disk($media->disk)->url($media->path);
+        // The policy, not the disk: a caller's shorter lifetime has to reach the
+        // store's own pre-signed link too, not only the signed route.
+        $url = $this->storage->disk($media->disk)->url($media->path, $policy->temporaryUrlExpiry());
 
         if ($url !== null) {
             return $url;

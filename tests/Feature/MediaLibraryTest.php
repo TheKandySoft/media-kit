@@ -403,6 +403,34 @@ it('shortens every link of one read when the caller asks, not just some', functi
     expect($resource->variant('large')?->url)->toContain('expires=');
 });
 
+it('gives a store\'s own pre-signed link the lifetime the caller asked for', function () {
+    // A receipt meant to be readable for fifteen minutes was handed out for the
+    // disk's hour: the override reached only the signed route, never the link
+    // the store mints itself.
+    Carbon::setTestNow('2026-10-12 12:00:00');
+    Storage::fake('secret');
+    config(['filesystems.disks.secret.visibility' => 'private']);
+    Storage::disk('secret')->buildTemporaryUrlsUsing(
+        fn(string $path, DateTimeInterface $expiration): string => "https://store.test/{$path}?expires={$expiration->getTimestamp()}",
+    );
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->create('receipt.pdf', 10, 'application/pdf')),
+        null,
+        'secret',
+    );
+
+    $expires = fn(?LinkLifetime $lifetime): string => (string) parse_url(
+        app(MediaReader::class)->byUuid($media->uuid, lifetime: $lifetime)->url,
+        PHP_URL_QUERY,
+    );
+
+    expect($expires(LinkLifetime::minutes(15)))->toBe('expires=' . now()->addMinutes(15)->getTimestamp())
+        ->and($expires(null))->toBe('expires=' . now()->addMinutes(60)->getTimestamp());
+
+    Carbon::setTestNow();
+});
+
 it('leaves the disk to decide when nobody overrides it', function () {
     $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
 

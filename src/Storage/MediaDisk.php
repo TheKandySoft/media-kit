@@ -2,6 +2,7 @@
 
 namespace KandySoft\MediaKit\Storage;
 
+use DateTimeInterface;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use KandySoft\MediaKit\Data\MediaPolicy;
@@ -123,13 +124,16 @@ final class MediaDisk
      *
      * Local private disks land in the null branch — the caller then falls back
      * to a signed route that streams the file through the application.
+     *
+     * `$expiry` is the caller's lifetime for a private file's link; without it
+     * the disk's own applies.
      */
-    public function url(string $path): ?string
+    public function url(string $path, ?DateTimeInterface $expiry = null): ?string
     {
         try {
             return $this->policy->public
                 ? $this->filesystem->url($path)
-                : $this->filesystem->temporaryUrl($path, $this->policy->temporaryUrlExpiry());
+                : $this->filesystem->temporaryUrl($path, $expiry ?? $this->policy->temporaryUrlExpiry());
         } catch (RuntimeException) {
             return null;
         }

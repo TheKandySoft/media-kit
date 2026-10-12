@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1
+
+- **A caller's lifetime reaches the store's own link.** `LinkLifetime` shortened only the signed
+  route; a private file on a store that mints pre-signed links (S3, GCS) still got the disk's
+  lifetime — a receipt meant to be readable for fifteen minutes stayed readable for an hour.
+
 ## 1.6.0
 
 Two ways an object store could leave the package holding records for files that do not exist.
