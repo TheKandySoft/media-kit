@@ -6,6 +6,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
 use KandySoft\MediaKit\Data\MediaPolicy;
 use KandySoft\MediaKit\Exceptions\MediaNotFound;
+use KandySoft\MediaKit\Exceptions\MediaNotStored;
 use RuntimeException;
 
 /**
@@ -53,16 +54,26 @@ final class MediaDisk
         return $this->filesystem->exists($path);
     }
 
+    /**
+     * Writes refuse quietly on a disk with `'throw' => false`, so the result is
+     * checked here rather than trusted: a record must never outlive its bytes.
+     */
     public function put(string $path, string $contents): void
     {
-        $this->filesystem->put($path, $contents);
+        if ($this->filesystem->put($path, $contents) !== true) {
+            throw MediaNotStored::path($this->name, $path);
+        }
     }
 
     public function upload(UploadedFile $file, string $directory, string $filename): string
     {
-        $this->filesystem->putFileAs($directory, $file, $filename);
+        $path = $directory === '' ? $filename : "{$directory}/{$filename}";
 
-        return $directory === '' ? $filename : "{$directory}/{$filename}";
+        if ($this->filesystem->putFileAs($directory, $file, $filename) === false) {
+            throw MediaNotStored::path($this->name, $path);
+        }
+
+        return $path;
     }
 
     public function delete(string $path): bool

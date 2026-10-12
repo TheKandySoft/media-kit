@@ -35,6 +35,22 @@ A disk counts as public when it says so:
 The default is private. That direction is deliberate: mislabelling a private disk as public would
 hand out permanent links to files meant to stay behind a signature.
 
+On an object store `'visibility' => 'public'` is more than a label: every write then asks for a
+public-read ACL, and a bucket with ACLs disabled — the AWS default for new buckets — refuses it.
+Leave the disk's visibility alone and tell the package instead:
+
+```php
+// config/media-kit.php
+'disks' => [
+    's3_public' => ['public' => true],
+],
+```
+
+The bucket is then made readable by its own policy, or read only through a proxy (below).
+
+A write the disk refuses throws `MediaNotStored`, even on a disk with `'throw' => false`: no record
+is created for a file that was never stored.
+
 What a caller gets back as `url` depends on the disk:
 
 | Disk | URL |
@@ -100,6 +116,40 @@ Links are then signed over path and query only, and the root is put in front of 
 
 The root can be a full address too (`https://files.example.com`). Links a disk mints itself — a
 public URL, an S3 pre-signed one — are the disk's own and are not touched.
+
+## Buckets behind your own domain
+
+Nothing has to reach the browser with the bucket's real address on it. Point all three kinds of
+link at one host of your own — say `storage.example.com` — and let its proxy forward to the
+store:
+
+```php
+// config/filesystems.php — path-style, so the bucket is the first segment of every path
+'s3_public' => [
+    'driver' => 's3',
+    'bucket' => 'shop-public',
+    'url' => 'https://storage.example.com/shop-public',      // permanent links
+    'use_path_style_endpoint' => true,
+    // ...
+],
+'s3_private' => [
+    'driver' => 's3',
+    'bucket' => 'shop-private',
+    'temporary_url' => 'https://storage.example.com',        // pre-signed links: host only
+    'use_path_style_endpoint' => true,
+    // ...
+],
+```
+
+```dotenv
+MEDIA_KIT_ROUTE_URL=https://storage.example.com             # signed links: /media/…
+```
+
+The proxy sends `/<public bucket>/…` and `/<private bucket>/…` to the store and `/media/…` to the
+application. A pre-signed link stays valid only if the proxy forwards it unchanged — the path and
+query as they arrived, `Host` set to the store's own host — because that is what was signed.
+`temporary_url` replaces the host of a pre-signed link and nothing else, which is why the buckets
+are told apart by path.
 
 ## Adopting existing files
 

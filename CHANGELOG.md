@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.0
+
+Two ways an object store could leave the package holding records for files that do not exist.
+
+- **A refused write is an error.** A disk configured with `'throw' => false` answers a rejected
+  write with `false`, and the package went on to create the record anyway — a picture in the
+  catalogue whose file was never stored, found only when somebody opened it. Writes now throw
+  `MediaNotStored` and nothing is recorded.
+- **`disks.<name>.public`** marks a disk public without its own `'visibility' => 'public'`. On an
+  object store that setting asks for a public-read ACL on every write, and a bucket with ACLs
+  disabled — the AWS default for new buckets — refuses every one of them. A bucket made readable
+  by its policy, or read only through a proxy, now says it in the package's configuration and
+  sends no ACL at all.
+
 ## 1.5.0
 
 What an application needs to run the package as a service of its own — behind a proxy, on the

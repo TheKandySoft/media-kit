@@ -87,6 +87,13 @@ return [
     |       'cache_ttl'         => 900,
     |   ],
     |
+    | 'public' marks a disk public without the disk's own 'visibility'. On an
+    | object store that setting also asks for a public-read ACL on every write,
+    | which a bucket with ACLs disabled (the AWS default) refuses; a bucket
+    | made readable by its policy, or read through a proxy, says it here:
+    |
+    |   's3_public' => ['public' => true],
+    |
     */
 
     'disks' => [],

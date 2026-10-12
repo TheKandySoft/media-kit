@@ -54,7 +54,7 @@ final class MediaStorageManager implements MediaStorage
         $variantTtl = $value('variant_url_ttl', null);
 
         return new MediaPolicy(
-            public: $this->isPublic($disk),
+            public: $this->isPublic($disk, $overrides),
             temporaryUrlTtl: (int) $value('temporary_url_ttl', 60),
             // Empty means a link with no expiry. Zero means the same: "valid
             // for nought minutes" would not be a setting anybody wants.
@@ -67,9 +67,22 @@ final class MediaStorageManager implements MediaStorage
      * A disk is public when it says so itself. Defaulting to private is the
      * safe direction: mislabelling a private disk as public would hand out
      * permanent links to files that were meant to stay behind a signature.
+     *
+     * `media-kit.disks.<name>.public` says it without touching the disk. On an
+     * object store `'visibility' => 'public'` is more than a label: every write
+     * then asks for a public-read ACL, which a bucket with ACLs disabled — the
+     * default on AWS — refuses outright. Such a bucket is made readable by its
+     * own policy, or not at all when a proxy reads it, and only this package
+     * needs to know that its addresses are permanent.
+     *
+     * @param  array<string, mixed>  $overrides
      */
-    private function isPublic(string $disk): bool
+    private function isPublic(string $disk, array $overrides): bool
     {
+        if (array_key_exists('public', $overrides)) {
+            return (bool) $overrides['public'];
+        }
+
         return $this->config->get("filesystems.disks.{$disk}.visibility") === 'public';
     }
 }

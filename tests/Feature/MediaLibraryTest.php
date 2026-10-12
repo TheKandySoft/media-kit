@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,7 @@ use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Exceptions\MediaNotFound;
+use KandySoft\MediaKit\Exceptions\MediaNotStored;
 use KandySoft\MediaKit\Exceptions\UnsupportedFileType;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
@@ -312,6 +314,46 @@ it('reports a public disk as public and a private one as private', function () {
 
     expect(app(MediaStorage::class)->disk('public')->isPublic())->toBeTrue()
         ->and(app(MediaStorage::class)->disk('secret')->isPublic())->toBeFalse();
+});
+
+it('takes the package\'s word for a public disk over the disk\'s own visibility', function () {
+    // An object store asks for a public-read ACL on every write of a disk with
+    // 'visibility' => 'public', and a bucket with ACLs disabled refuses it. The
+    // package still has to know such a disk hands out permanent addresses.
+    Storage::fake('bucket');
+    Storage::fake('secret');
+    config([
+        'filesystems.disks.secret.visibility' => 'public',
+        'media-kit.disks.bucket' => ['public' => true],
+        'media-kit.disks.secret' => ['public' => false],
+    ]);
+
+    expect(app(MediaStorage::class)->disk('bucket')->isPublic())->toBeTrue()
+        ->and(app(MediaStorage::class)->disk('secret')->isPublic())->toBeFalse();
+
+    $media = app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->image('photo.png', 100, 100)),
+        null,
+        'bucket',
+    );
+
+    expect($media->is_public)->toBeTrue();
+});
+
+it('records nothing when the disk refuses to store the file', function () {
+    // A disk with 'throw' => false answers a refused write with false. The
+    // record used to be created anyway, pointing at a file that never existed.
+    $disk = Mockery::mock(Filesystem::class);
+    $disk->shouldReceive('putFileAs')->andReturnFalse();
+    Storage::set('refusing', $disk);
+
+    expect(fn() => app(MediaWriter::class)->store(
+        MediaUpload::file(UploadedFile::fake()->image('photo.png', 100, 100)),
+        null,
+        'refusing',
+    ))->toThrow(MediaNotStored::class);
+
+    expect(MediaFile::query()->count())->toBe(0);
 });
 
 it('lets one disk expire its links while another keeps them forever', function () {
