@@ -66,11 +66,30 @@ final class MediaDisk
         }
     }
 
+    /**
+     * The file is opened here rather than by `putFileAs`: that one hands an
+     * unopenable path on as `false`, and a worker that does not turn the
+     * warning into an exception then stores an empty object under the name.
+     */
     public function upload(UploadedFile $file, string $directory, string $filename): string
     {
         $path = $directory === '' ? $filename : "{$directory}/{$filename}";
+        $source = (string) $file->getRealPath();
+        $stream = is_file($source) ? fopen($source, 'r') : false;
 
-        if ($this->filesystem->putFileAs($directory, $file, $filename) === false) {
+        if (! is_resource($stream)) {
+            throw MediaNotStored::path($this->name, $path);
+        }
+
+        try {
+            $stored = $this->filesystem->put($path, $stream);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        if ($stored !== true) {
             throw MediaNotStored::path($this->name, $path);
         }
 

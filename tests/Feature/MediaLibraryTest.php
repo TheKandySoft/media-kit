@@ -344,7 +344,7 @@ it('records nothing when the disk refuses to store the file', function () {
     // A disk with 'throw' => false answers a refused write with false. The
     // record used to be created anyway, pointing at a file that never existed.
     $disk = Mockery::mock(Filesystem::class);
-    $disk->shouldReceive('putFileAs')->andReturnFalse();
+    $disk->shouldReceive('put')->andReturnFalse();
     Storage::set('refusing', $disk);
 
     expect(fn() => app(MediaWriter::class)->store(
@@ -354,6 +354,55 @@ it('records nothing when the disk refuses to store the file', function () {
     ))->toThrow(MediaNotStored::class);
 
     expect(MediaFile::query()->count())->toBe(0);
+});
+
+it('stores an upload whose bytes live on another disk', function () {
+    // Livewire keeps an upload on its temporary disk; on S3 the file's "real
+    // path" is only the key in the bucket. It used to reach the store as an
+    // empty object while the record carried the full size.
+    Storage::fake('uploads');
+    $image = UploadedFile::fake()->image('photo.png', 120, 80);
+    $bytes = file_get_contents($image->getRealPath());
+    Storage::disk('uploads')->put('livewire-tmp/abc.png', $bytes);
+
+    $upload = new class (tempnam(sys_get_temp_dir(), 'lw'), 'photo.png') extends UploadedFile {
+        public function getRealPath(): string|false
+        {
+            return 'livewire-tmp/abc.png';
+        }
+
+        /**
+         * @return resource|null
+         */
+        public function readStream()
+        {
+            return Storage::disk('uploads')->readStream('livewire-tmp/abc.png');
+        }
+    };
+
+    $media = app(MediaWriter::class)->store(MediaUpload::file($upload));
+
+    expect(Storage::disk('public')->get($media->path))->toBe($bytes)
+        ->and($media->original_name)->toBe('photo.png')
+        ->and($media->size)->toBe(strlen($bytes))
+        ->and($media->width)->toBe(120)
+        ->and($media->height)->toBe(80)
+        ->and(glob(storage_path('app/media-kit-tmp/*')) ?: [])->toBe([]);
+});
+
+it('stores no empty object for an upload it cannot open', function () {
+    $upload = new class (tempnam(sys_get_temp_dir(), 'lw'), 'photo.png') extends UploadedFile {
+        public function getRealPath(): string|false
+        {
+            return 'livewire-tmp/missing.png';
+        }
+    };
+
+    expect(fn() => app(MediaWriter::class)->store(MediaUpload::file($upload)))
+        ->toThrow(MediaNotStored::class);
+
+    expect(Storage::disk('public')->allFiles())->toBe([])
+        ->and(MediaFile::query()->count())->toBe(0);
 });
 
 it('lets one disk expire its links while another keeps them forever', function () {

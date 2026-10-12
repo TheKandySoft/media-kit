@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.2
+
+- **An upload kept on an object store arrives whole.** Livewire keeps an upload on its temporary
+  disk, and on S3 the file's "real path" is only its key in the bucket. The package opened that
+  path as a local file; a worker that does not turn the failed open into an exception (Octane on
+  FrankenPHP) then stored an empty object, while the record carried the full size — a picture
+  that showed until it was saved. Such an upload is now copied from its own stream first, and a
+  file that cannot be opened at all throws `MediaNotStored` instead of being stored empty.
+
 ## 1.6.1
 
 - **A caller's lifetime reaches the store's own link.** `LinkLifetime` shortened only the signed

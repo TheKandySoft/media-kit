@@ -19,6 +19,7 @@ use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Models\MediaFileTranslation;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Storage\MediaDisk;
+use KandySoft\MediaKit\Storage\TemporaryFile;
 use KandySoft\MediaKit\Support\ImageFactory;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\PlaceholderFactory;
@@ -87,6 +88,20 @@ final class MediaWriteService implements MediaWriter
             throw new \InvalidArgumentException('MediaUpload::store() needs an upload carrying a file.');
         }
 
+        $local = $this->localCopy($file);
+
+        if ($local !== null) {
+            try {
+                return $this->store(
+                    MediaUpload::file($local->toUploadedFile($file->getClientOriginalName()), $upload->tag, $upload->locale, $upload->captions),
+                    $model,
+                    $disk,
+                );
+            } finally {
+                $local->delete();
+            }
+        }
+
         $mediaDisk = $this->storage->disk($disk);
         $extension = strtolower($file->getClientOriginalExtension());
         $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
@@ -130,6 +145,15 @@ final class MediaWriteService implements MediaWriter
     public function replace(string $uuid, UploadedFile $file, array $captions = []): MediaFile
     {
         $existing = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
+        $local = $this->localCopy($file);
+
+        if ($local !== null) {
+            try {
+                return $this->replace($uuid, $local->toUploadedFile($file->getClientOriginalName()), $captions);
+            } finally {
+                $local->delete();
+            }
+        }
 
         $disk = $this->storage->disk($existing->disk);
         $extension = strtolower($file->getClientOriginalExtension());
@@ -457,6 +481,27 @@ final class MediaWriteService implements MediaWriter
      * as a PDF that is really HTML. The claim is only kept when the content
      * cannot be identified at all.
      */
+    /**
+     * A copy on this machine of an upload whose bytes are elsewhere, or null
+     * when they are already here.
+     *
+     * Livewire keeps an upload on its temporary disk, and on an object store
+     * the file's "real path" is only its key there. Storing it, measuring it
+     * and drawing its placeholder all need a file that can be opened.
+     */
+    private function localCopy(UploadedFile $file): ?TemporaryFile
+    {
+        if (is_file((string) $file->getRealPath()) || ! method_exists($file, 'readStream')) {
+            return null;
+        }
+
+        $stream = $file->readStream();
+
+        return is_resource($stream)
+            ? TemporaryFile::fromStream($stream, Str::random(20) . '.' . strtolower($file->getClientOriginalExtension()))
+            : null;
+    }
+
     private function mimeTypeOf(UploadedFile $file): ?string
     {
         try {
