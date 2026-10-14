@@ -175,12 +175,40 @@ URLs, not in the payloads clients receive.
 | `disk`, `directory` | where files land |
 | `image.driver` | `gd` or `imagick` |
 | `image.variants` | named multipliers of the requested size |
+| `image.quality` | encoder quality per format (`webp`, `jpg`, `avif`) |
+| `image.upscale` | `false` (default) stops a rendition at its original's size instead of enlarging it |
+| `image.crop_position`, `image.strip_metadata`, `image.progressive`, `image.sharpen` | how a rendition is cropped and encoded — see [rendition quality](#rendition-quality) |
+| `image.resample`, `image.srgb` | Lanczos scaling and conversion to sRGB (Imagick) |
+| `image.original` | limits, quality and metadata stripping for the uploaded original |
+| `image.version` | raise it to regenerate every rendition |
 | `temporary_url_ttl`, `variant_url_ttl` | link lifetimes, in minutes; empty means no expiry |
 | `cache_ttl` | how long a served answer may be reused, in seconds |
 | `disks` | per-disk overrides of the three above |
 | `routes.enabled`, `routes.prefix`, `routes.middleware` | serving endpoints, or none at all |
 | `routes.url` | the root links start at, when a proxy rewrites the address — see [storage](docs/storage.md#behind-a-proxy) |
 | `types` | extensions accepted on top of the built-in ones, per type |
+| `encryption.enabled`, `encryption.keys`, `encryption.current`, `disks.<name>.encrypt` | encryption at rest — see [storage](docs/storage.md#encryption-at-rest) |
+
+## Rendition quality
+
+Every setting that shapes the pixels — quality, crop anchor, metadata, sharpening and
+`image.version` — is part of a rendition's path. Changing one does not overwrite anything: the
+next request for a size makes a new file at a new path, and the old file is simply no longer
+asked for. Renditions are matched by that path, so a file of the right size made at yesterday's
+quality is never served again.
+
+- **No enlarging by default.** A 1200-pixel original asked for at 2400 gives a 1200-pixel
+  rendition with the same proportions, not a blurred 2400. Two variants may then share a width;
+  the `srcset` lists it once. Set `image.upscale` to `true` for exact sizes.
+- **Metadata is stripped** (`image.strip_metadata`): camera, time and GPS position do not leave
+  with the picture.
+- **Colour and detail survive** on Imagick: a picture with a colour profile is converted to sRGB
+  first (`image.srgb`), and scaling uses the Lanczos filter (`image.resample`).
+- **The original itself** is stored as it came unless `image.original` sets limits or asks for its
+  metadata to go — then it is scaled down, converted and re-encoded once, on upload.
+- **`media:regenerate`** makes the renditions again right away instead of on first request.
+- **After changing the settings**, rebuild whatever links to renditions directly (a catalogue
+  index that warmed them), then run `media:prune` to delete the files made with the old ones.
 
 ## Commands
 
@@ -188,7 +216,14 @@ URLs, not in the payloads clients receive.
 php artisan media:show <uuid>     # what a client would receive
 php artisan media:adopt           # register files already on a disk
 php artisan media:prune           # drop renditions nothing can reach any more
+php artisan media:prune --model='App\Models\Product' --width=1200 --height=840
+                                  # …and those of one owner no longer at this size
 php artisan media:placeholders    # fill in placeholders for images stored earlier
+php artisan media:regenerate      # make renditions again under the current settings (--prune)
+php artisan media:key             # print a new encryption key
+php artisan media:encrypt         # encrypt files stored before encryption was on
+php artisan media:decrypt         # …and back
+php artisan media:rekey           # rewrap every file key with the current key
 ```
 
 ## Documentation

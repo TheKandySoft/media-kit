@@ -167,3 +167,62 @@ $writer->adopt('media/imports/brochure.pdf', disk: 's3', tag: 'imported');
 
 Adoption reads dimensions and size from the disk, so it is a little more expensive than a normal
 upload — it is a maintenance path, not a hot one.
+
+## Encryption at rest
+
+Off by default. Switched on, every file is encrypted before it leaves the application, so a
+copied bucket, a stolen backup or a server image holds nothing readable without the keys —
+the at-rest safeguard that GDPR Art. 32 and most data-protection audits ask for.
+
+```bash
+php artisan media:key            # prints e.g. 20261013:base64…
+```
+
+```dotenv
+MEDIA_KIT_ENCRYPT=true                      # every disk; or per disk, see below
+MEDIA_KIT_KEYS="20261013:base64…"           # id:key, comma-separated
+MEDIA_KIT_KEY_CURRENT=20261013              # optional; defaults to the last listed
+```
+
+```php
+// config/media-kit.php — only some disks
+'disks' => [
+    'private' => ['encrypt' => true],
+],
+```
+
+**How.** Every file gets its own random key and is encrypted with it as a libsodium
+secretstream (XChaCha20-Poly1305) in 64 KiB chunks — streamed, so a video costs no more memory
+than a thumbnail. The file key is stored in the record wrapped with the application key
+(`key_id`, `wrapped_key`), next to the SHA-256 of the plaintext (`checksum`). An altered byte
+fails its chunk and a file cut short never reaches its final one: both throw `MediaTampered`
+instead of serving garbage. A record naming a key the application does not have throws
+`MediaKeyMissing`.
+
+**What changes when it is on.**
+
+- An encrypted file has **no direct address**. The disk or a CDN in front of it would hand out
+  ciphertext, so every link goes through the package's signed route, which decrypts on the
+  way out. Cache headers stay as they were; what is lost is serving straight from the store.
+- Encrypted pictures get **no placeholder**: that is a readable copy kept in the database.
+- Renditions are encrypted too, each with its own key.
+- Plain and encrypted files live side by side: each record says how its file was stored.
+
+**Turning it on for files already stored.** `media:encrypt` writes each one encrypted under a
+new name, reads it back, checks it against the plaintext's hash, and only then moves the record
+and deletes the original; renditions are dropped and come back encrypted. `--disk` limits it,
+`--dry-run` counts. `media:decrypt` is the way back — switch encryption off first, or new
+uploads keep arriving encrypted.
+
+**Rotating keys.** Add a new key to `MEDIA_KIT_KEYS`, make it current, run `media:rekey`. Only
+the wrapped keys in the records change — no file is rewritten — and once it has run, the old
+key can leave the configuration.
+
+**Keys elsewhere.** `MEDIA_KIT_KEYS` is the default source. A host that keeps keys in a KMS or a
+vault binds its own `KandySoft\MediaKit\Contracts\KeyProvider`; files only ever name a key by
+its id.
+
+**Object stores have a cheaper option.** S3 server-side encryption (SSE-S3 or SSE-KMS, set in
+the disk's `options`) needs nothing from this package and keeps direct addresses working. It
+protects the disks of the provider, not against whoever holds the bucket credentials — package
+encryption does, because the keys never reach the store.

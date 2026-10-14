@@ -21,7 +21,16 @@ use KandySoft\MediaKit\Services\ImageVariantGenerator;
  * ever deletes them either.
  *
  * The second kind needs to be told what the current size is, because only the
- * application knows: the package resizes to whatever it is handed.
+ * application knows: the package resizes to whatever it is handed. Sizes
+ * differ by kind of picture, so tell it whose pictures too (`--model`).
+ *
+ * A third kind needs no telling: renditions made with other settings —
+ * quality, crop, metadata — before those changed. Their path is not the one
+ * the current settings produce, so nothing asks for them either.
+ *
+ * Run it after the application has rebuilt whatever still links to the old
+ * files (a catalogue index, a page cache): those links would otherwise point
+ * at files this command has just removed.
  */
 class PruneMediaVariants extends Command
 {
@@ -29,6 +38,7 @@ class PruneMediaVariants extends Command
                             {--width= : Width the application asks pictures at}
                             {--height= : Height the application asks pictures at}
                             {--format= : Format the application asks for, defaults to the configured one}
+                            {--model= : Only renditions of files owned by this model class (or morph alias)}
                             {--dry-run : List what would go without deleting anything}';
 
     protected $description = 'Delete image renditions that can no longer be reached';
@@ -42,7 +52,22 @@ class PruneMediaVariants extends Command
         $requested = $this->requestedSize();
         $removed = 0;
 
-        foreach (MediaFile::query()->where('is_variant', true)->with('parent')->lazyById(500, 'uuid') as $variant) {
+        $model = $this->option('model');
+
+        if ($requested !== null && ! $model) {
+            // A size belongs to one kind of picture: product photos, category
+            // banners and page images are asked for at different sizes, and
+            // judging all of them against one would delete the others.
+            $this->warn('No --model given — every owner\'s renditions are judged against this one size.');
+        }
+
+        $query = MediaFile::query()->where('is_variant', true)->with('parent');
+
+        if ($model) {
+            $query->where('model_type', $model);
+        }
+
+        foreach ($query->lazyById(500, 'uuid') as $variant) {
             $reason = $this->unreachable($variant, $storage, $generator, $requested);
 
             if ($reason === null) {
@@ -84,6 +109,20 @@ class PruneMediaVariants extends Command
 
         if ($parent === null) {
             return 'original is gone';
+        }
+
+        // The path carries the rendition settings. A file whose path is not
+        // the one today's settings would give it was made at another quality
+        // or crop, and nothing will ask for it again.
+        $current = $generator->pathFor(
+            (string) $parent->path,
+            (int) $variant->width,
+            (int) $variant->height,
+            (string) $variant->extension,
+        );
+
+        if ($variant->path !== $current) {
+            return 'made with other rendition settings';
         }
 
         if ($requested === null) {

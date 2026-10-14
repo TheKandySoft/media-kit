@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.7.0
+
+### Rendition quality
+
+Renditions could not be made sharper: the quality was the library's 75, a small original was
+stretched to whatever size was asked for, and a rendition's path held only its size — so even a
+new quality would never have reached a picture already on disk.
+
+- **Quality per format** (`image.quality`), plus the crop anchor, progressive encoding and
+  sharpening. All of them, with a manual `image.version`, are part of the rendition's path: a
+  change produces new files, and renditions are found by path, so one made with older settings
+  is never served again.
+- **No enlarging** (`image.upscale`, off by default). A rendition stops at its original's size and
+  keeps the proportions; the `srcset` lists each real width once.
+- **Metadata is stripped** from renditions (`image.strip_metadata`): Imagick used to carry EXIF —
+  GPS position included — into every published copy.
+- **`media:prune`** removes renditions made with other settings without being told a size, and
+  `--model` limits the size check to one owner: product photos, banners and page images are
+  asked for at different sizes, and judging all of them by one deleted the rest.
+- **The `image` block merges per key.** A host that set one image option lost every other one,
+  variants included, because only top-level keys were merged.
+- **The first two requests for a size no longer fail.** Both generated the file, and the second
+  to record it hit the unique path and answered 500; it now returns the record the first one made.
+- **Lanczos resampling** (`image.resample`, Imagick): fine detail — weave, stitching, small print —
+  stays crisp when a picture is scaled down, instead of the library's plain scale.
+- **Colour converted to sRGB** (`image.srgb`, Imagick) before anything else: a Display P3 photo from
+  a phone no longer turns dull once its profile is stripped. The sRGB profile ships with the package
+  (CC0).
+- **Originals can be reworked on upload** (`image.original`): larger than the limits — scaled down,
+  converted and re-encoded; `strip_metadata` — EXIF and GPS removed. Off by default, and an original
+  that needs neither is never re-encoded.
+- **One decode per upload**: size and placeholder used to read the picture twice.
+- **`media:regenerate`** makes every rendition again under the current settings, so a new quality
+  is in place before the first visitor asks; `--prune` removes the old files.
+- Removed `src/Data/MediaFile.php`, a stray copy of the model declaring the wrong namespace.
+- Requires `intervention/image` 3.11: before it the Imagick encoders ignored `strip`, and EXIF —
+  GPS included — stayed in every rendition.
+
+### Encryption at rest
+
+**Encryption at rest**, off by default. Switched on for every disk or for one, every file is
+encrypted before it leaves the application: a copied bucket or a stolen backup holds nothing
+readable without the keys. See [storage](docs/storage.md#encryption-at-rest).
+
+- Envelope encryption: a random key per file, libsodium secretstream in 64 KiB chunks
+  (streamed, authenticated, truncation-proof), the file key wrapped with the application key.
+- Keys by id in `MEDIA_KIT_KEYS`; `media:key` makes one, `media:rekey` rotates without rewriting
+  a file. A host can supply keys from elsewhere by binding `Contracts\KeyProvider`.
+- An encrypted file is served only through the signed route, decrypted on the way out; it gets
+  no direct address and no placeholder. Renditions are encrypted too.
+- **Byte ranges**: the file route answers `Range` with `206 Partial Content`, decrypting only what is
+  sent — a video on an encrypted disk can be seeked without downloading it from the start.
+- `media:encrypt` converts files stored before (verified against the plaintext hash before the
+  original goes), `media:decrypt` converts them back.
+- A rendition is made by one request at a time (a cache lock where the store has one): with
+  per-file keys two concurrent writes could otherwise leave a record describing the other file.
+- New nullable columns on `media_files`: `encryption`, `key_id`, `wrapped_key`, `checksum`.
+  `MediaDisk::upload()` refuses on an encrypting disk — use `store()`, which also returns the
+  envelope. `ext-sodium` is suggested, needed only when encryption is used.
+
 ## 1.6.2
 
 - **An upload kept on an object store arrives whole.** Livewire keeps an upload on its temporary

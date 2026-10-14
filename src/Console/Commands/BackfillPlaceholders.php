@@ -3,6 +3,7 @@
 namespace KandySoft\MediaKit\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Schema;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Models\MediaFile;
@@ -32,6 +33,13 @@ class BackfillPlaceholders extends Command
         $query = MediaFile::query()
             ->where('type', MediaType::Image->value)
             ->where('is_variant', false);
+
+        // A placeholder is a readable copy in the database: an encrypted file
+        // gets none. Asked only where the column exists — before the migration
+        // there are no encrypted files to skip.
+        if (Schema::hasColumn((new MediaFile())->getTable(), 'encryption')) {
+            $query->whereNull('encryption');
+        }
 
         if (! $this->option('force')) {
             $query->whereNull('placeholder');

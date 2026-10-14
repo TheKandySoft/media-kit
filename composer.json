@@ -11,8 +11,11 @@
     },
     "require": {
         "php": "^8.3",
-        "intervention/image": "^3.10",
+        "intervention/image": "^3.11",
         "laravel/framework": "^12.0|^13.0"
+    },
+    "suggest": {
+        "ext-sodium": "Needed only to encrypt files at rest (media-kit.encryption)."
     },
     "require-dev": {
         "laravel/pint": "^1.30",

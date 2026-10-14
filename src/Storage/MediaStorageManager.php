@@ -6,12 +6,14 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Filesystem\Factory as Filesystems;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Data\MediaPolicy;
+use KandySoft\MediaKit\Encryption\FileCipher;
 
 final class MediaStorageManager implements MediaStorage
 {
     public function __construct(
         private readonly Filesystems $filesystems,
         private readonly Config $config,
+        private readonly FileCipher $cipher,
     ) {}
 
     public function disk(?string $disk = null): MediaDisk
@@ -26,6 +28,7 @@ final class MediaStorageManager implements MediaStorage
             name: $name,
             filesystem: $this->filesystems->disk($name),
             policy: $this->policyFor($name),
+            cipher: $this->cipher,
         );
     }
 
@@ -60,6 +63,11 @@ final class MediaStorageManager implements MediaStorage
             // for nought minutes" would not be a setting anybody wants.
             variantUrlTtl: $variantTtl === null || $variantTtl === '' ? null : (int) $variantTtl,
             cacheTtl: (int) $value('cache_ttl', 31536000),
+            // Per disk, or for every disk at once. Off by default: an
+            // encrypted disk serves every file through the application.
+            encrypt: (bool) (array_key_exists('encrypt', $overrides)
+                ? $overrides['encrypt']
+                : $this->config->get('media-kit.encryption.enabled', false)),
         );
     }
 

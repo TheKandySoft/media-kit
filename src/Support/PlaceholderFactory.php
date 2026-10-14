@@ -27,6 +27,10 @@ final class PlaceholderFactory
 
     public function forUploadedFile(UploadedFile $file): ?string
     {
+        if (! $this->enabled()) {
+            return null;
+        }
+
         try {
             return $this->encode($this->images->fromUploadedFile($file));
         } catch (Throwable) {
@@ -36,8 +40,29 @@ final class PlaceholderFactory
         }
     }
 
+    /**
+     * From a picture already read — without touching it: the caller keeps
+     * using it.
+     */
+    public function forImage(\Intervention\Image\Interfaces\ImageInterface $image): ?string
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        try {
+            return $this->encode(clone $image);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     public function forContents(string $contents): ?string
     {
+        if (! $this->enabled()) {
+            return null;
+        }
+
         try {
             return $this->encode($this->images->fromContents($contents));
         } catch (Throwable) {

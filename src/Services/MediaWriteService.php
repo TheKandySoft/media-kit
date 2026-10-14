@@ -2,12 +2,17 @@
 
 namespace KandySoft\MediaKit\Services;
 
+use Closure;
+use Illuminate\Contracts\Cache\Factory as Cache;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
+use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaFilter;
@@ -21,6 +26,7 @@ use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Storage\MediaDisk;
 use KandySoft\MediaKit\Storage\TemporaryFile;
 use KandySoft\MediaKit\Support\ImageFactory;
+use KandySoft\MediaKit\Support\ImageIntake;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\PlaceholderFactory;
 use Throwable;
@@ -35,6 +41,8 @@ final class MediaWriteService implements MediaWriter
         private readonly PlaceholderFactory $placeholders,
         private readonly MediaTypeResolver $types,
         private readonly Config $config,
+        private readonly Cache $cache,
+        private readonly ImageIntake $intake,
     ) {}
 
     /**
@@ -106,13 +114,23 @@ final class MediaWriteService implements MediaWriter
         $extension = strtolower($file->getClientOriginalExtension());
         $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
-        $path = $mediaDisk->upload(
-            $file,
-            $this->directoryFor($model, $upload->tag),
-            Str::random(40) . '.' . $extension,
-        );
+        // Read once — size, placeholder and, if the host asks, a reworked
+        // original. A placeholder is a readable copy kept in the database: a
+        // disk that encrypts what it stores gets none.
+        $intake = $this->intake->read($type, $file, $extension, withPlaceholder: ! $mediaDisk->encrypts());
 
-        [$width, $height] = $this->dimensions($type, $file);
+        // Measured before the reworked copy is released with the temporary file.
+        $size = $intake->file->getSize() ?: null;
+
+        try {
+            [$path, $envelope] = $mediaDisk->store(
+                $intake->file,
+                $this->directoryFor($model, $upload->tag),
+                Str::random(40) . '.' . $extension,
+            );
+        } finally {
+            $intake->release();
+        }
 
         $record = $this->media->store([
             'model_type' => $model?->getMorphClass(),
@@ -123,10 +141,11 @@ final class MediaWriteService implements MediaWriter
             'type' => $type,
             'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
-            'width' => $width,
-            'height' => $height,
-            'placeholder' => $this->placeholderFor($type, $file),
-            'size' => $file->getSize() ?: null,
+            'width' => $intake->width,
+            'height' => $intake->height,
+            'placeholder' => $intake->placeholder,
+            'size' => $envelope?->size ?? $size,
+            ...Envelope::changes($envelope),
             'position' => 0,
             'is_public' => $mediaDisk->isPublic(),
             'is_variant' => false,
@@ -159,13 +178,21 @@ final class MediaWriteService implements MediaWriter
         $extension = strtolower($file->getClientOriginalExtension());
         $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
+        $intake = $this->intake->read($type, $file, $extension, withPlaceholder: ! $disk->encrypts());
+
         // Write the replacement before touching the old one: a failure here
         // leaves the original in place rather than a record pointing at nothing.
-        $path = $disk->upload(
-            $file,
-            dirname($existing->path),
-            Str::random(40) . '.' . $extension,
-        );
+        $size = $intake->file->getSize() ?: null;
+
+        try {
+            [$path, $envelope] = $disk->store(
+                $intake->file,
+                dirname($existing->path),
+                Str::random(40) . '.' . $extension,
+            );
+        } finally {
+            $intake->release();
+        }
 
         $stalePath = $existing->path;
 
@@ -173,18 +200,17 @@ final class MediaWriteService implements MediaWriter
             $this->forget($variant);
         }
 
-        [$width, $height] = $this->dimensions($type, $file);
-
         $existing->update([
             'path' => $path,
             'original_name' => $file->getClientOriginalName(),
             'type' => $type,
             'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
-            'width' => $width,
-            'height' => $height,
-            'placeholder' => $this->placeholderFor($type, $file),
-            'size' => $file->getSize() ?: null,
+            'width' => $intake->width,
+            'height' => $intake->height,
+            'placeholder' => $intake->placeholder,
+            'size' => $envelope?->size ?? $size,
+            ...Envelope::changes($envelope, $existing),
             'is_public' => $disk->isPublic(),
         ]);
 
@@ -239,7 +265,7 @@ final class MediaWriteService implements MediaWriter
         $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
         $type = $this->types->fromExtension($extension) ?? throw UnsupportedFileType::extension($extension);
 
-        [$width, $height] = $this->dimensionsFromDisk($type, $mediaDisk, $path);
+        [$width, $height, $placeholder] = $this->readFromDisk($type, $mediaDisk, $path);
 
         return $this->media->store([
             'disk' => $mediaDisk->name(),
@@ -250,9 +276,7 @@ final class MediaWriteService implements MediaWriter
             'extension' => $extension,
             'width' => $width,
             'height' => $height,
-            'placeholder' => $type->isImage()
-                ? $this->placeholders->forContents((string) $mediaDisk->get($path))
-                : null,
+            'placeholder' => $placeholder,
             'size' => $mediaDisk->size($path),
             'position' => 0,
             'is_public' => $mediaDisk->isPublic(),
@@ -275,7 +299,7 @@ final class MediaWriteService implements MediaWriter
         $copies = [];
 
         foreach ($originals as $original) {
-            $temporary = $this->storage->disk($original->disk)->pull($original->path);
+            $temporary = $this->storage->disk($original->disk)->pull($original->path, Envelope::of($original));
 
             try {
                 $copies[] = $this->store(
@@ -392,33 +416,79 @@ final class MediaWriteService implements MediaWriter
         $disk = $this->storage->disk($original->disk);
         $path = $this->variants->pathFor($original->path, $width, $height, $format);
 
-        $this->variants->generate($disk, $original->path, $path, $width, $height, $format);
+        return $this->exclusively("{$disk->name()}:{$path}", function () use ($original, $disk, $path, $width, $height, $format): MediaFile {
+            $existing = $this->media->findByPath($disk->name(), $path);
 
-        $existing = $this->media->findByPath($disk->name(), $path);
+            if ($existing !== null && $disk->exists($path)) {
+                return $existing;
+            }
 
-        if ($existing !== null) {
-            return $existing;
+            [$envelope, $size, $mime] = $this->variants->render($disk, $original, $path, $width, $height, $format);
+
+            $attributes = [
+                'mime_type' => $mime,
+                'size' => $size,
+                ...Envelope::changes($envelope, $existing),
+            ];
+
+            // A record whose file went missing: the file is back, and with an
+            // encrypting disk under a new key, so the record follows it.
+            if ($existing !== null) {
+                $existing->update($attributes);
+
+                return $existing;
+            }
+
+            try {
+                return $this->media->store([
+                    'model_type' => $original->model_type,
+                    'model_id' => $original->model_id,
+                    'disk' => $disk->name(),
+                    'path' => $path,
+                    'original_name' => basename($path),
+                    'type' => MediaType::Image,
+                    'extension' => pathinfo($path, PATHINFO_EXTENSION),
+                    'width' => $width,
+                    'height' => $height,
+                    'position' => $original->position,
+                    'is_public' => $disk->isPublic(),
+                    'is_variant' => true,
+                    'tag' => $original->tag,
+                    'locale' => $original->locale,
+                    'parent_uuid' => $original->uuid,
+                    ...$attributes,
+                ]);
+            } catch (UniqueConstraintViolationException $exception) {
+                // Another worker without a shared lock recorded the same size
+                // a moment earlier. Its record is the answer, not an error page.
+                return $this->media->findByPath($disk->name(), $path) ?? throw $exception;
+            }
+        });
+    }
+
+    /**
+     * One rendition is made by one request at a time.
+     *
+     * Two first requests for the same size used to both write the file, and the
+     * second to record it failed on the unique path. With encryption it would
+     * be worse than an error page: each write has its own key, and the record
+     * that won could describe the file that lost. Where the cache cannot lock,
+     * the unique-path fallback above still holds for files stored as they came.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $work
+     * @return T
+     */
+    private function exclusively(string $name, Closure $work): mixed
+    {
+        $store = $this->cache->store()->getStore();
+
+        if (! $store instanceof LockProvider) {
+            return $work();
         }
 
-        return $this->media->store([
-            'model_type' => $original->model_type,
-            'model_id' => $original->model_id,
-            'disk' => $disk->name(),
-            'path' => $path,
-            'original_name' => basename($path),
-            'type' => MediaType::Image,
-            'mime_type' => $disk->mimeType($path),
-            'extension' => pathinfo($path, PATHINFO_EXTENSION),
-            'width' => $width,
-            'height' => $height,
-            'size' => $disk->size($path),
-            'position' => $original->position,
-            'is_public' => $disk->isPublic(),
-            'is_variant' => true,
-            'tag' => $original->tag,
-            'locale' => $original->locale,
-            'parent_uuid' => $original->uuid,
-        ]);
+        return $store->lock('media-kit:' . md5($name), 30)->block(15, $work);
     }
 
     /**
@@ -470,9 +540,6 @@ final class MediaWriteService implements MediaWriter
     }
 
     /**
-     * @return array{0: int|null, 1: int|null}
-     */
-    /**
      * The type the bytes actually have, not the one the client claimed.
      *
      * The stored type is what the file is later served with, and the browser's
@@ -514,43 +581,22 @@ final class MediaWriteService implements MediaWriter
     }
 
     /**
-     * A placeholder is only meaningful for something that can be looked at.
+     * Size and placeholder of a file already on a disk — from one read.
+     *
+     * @return array{0: int|null, 1: int|null, 2: string|null}
      */
-    private function placeholderFor(MediaType $type, UploadedFile $file): ?string
-    {
-        return $type->isImage() ? $this->placeholders->forUploadedFile($file) : null;
-    }
-
-    private function dimensions(MediaType $type, UploadedFile $file): array
+    private function readFromDisk(MediaType $type, MediaDisk $disk, string $path): array
     {
         if (! $type->isImage()) {
-            return [null, null];
-        }
-
-        try {
-            $image = $this->images->fromUploadedFile($file);
-
-            return [$image->width(), $image->height()];
-        } catch (Throwable) {
-            return [null, null];
-        }
-    }
-
-    /**
-     * @return array{0: int|null, 1: int|null}
-     */
-    private function dimensionsFromDisk(MediaType $type, MediaDisk $disk, string $path): array
-    {
-        if (! $type->isImage()) {
-            return [null, null];
+            return [null, null, null];
         }
 
         try {
             $image = $this->images->fromContents($disk->get($path));
-
-            return [$image->width(), $image->height()];
         } catch (Throwable) {
-            return [null, null];
+            return [null, null, null];
         }
+
+        return [$image->width(), $image->height(), $this->placeholders->forImage($image)];
     }
 }

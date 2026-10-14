@@ -25,8 +25,10 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          # GD covers the default image backend; Imagick is opt-in per install.
-          extensions: dom, curl, libxml, mbstring, zip, gd, fileinfo, sqlite3
+          # Both image backends: GD is what a bare install has, and Imagick
+          # carries the colour conversion and Lanczos paths, which skip without it.
+          # Sodium covers encryption at rest.
+          extensions: dom, curl, libxml, mbstring, zip, gd, imagick, sodium, fileinfo, sqlite3
           coverage: none
 
       - name: Install dependencies

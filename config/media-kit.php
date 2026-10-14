@@ -100,6 +100,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Encryption at rest
+    |--------------------------------------------------------------------------
+    |
+    | Off by default. On, every file written to a disk is encrypted before it
+    | leaves the application: a copied bucket, a stolen backup or a server
+    | image hold nothing readable without the keys below. Turn it on for every
+    | disk here, or for one disk with `'disks' => ['private' => ['encrypt' =>
+    | true]]`.
+    |
+    | Each file gets its own key, encrypted ("wrapped") with the current key
+    | from 'keys' and stored next to the record. Keys are listed by id so they
+    | can rotate: add a new one, make it 'current', run `media:rekey` — no file
+    | is rewritten, and the old key may go once nothing names it.
+    |
+    | 'keys' is `id:base64,id:base64` (32 random bytes each; `media:key` makes
+    | one). Keep them out of the repository and the database: whoever has both
+    | the keys and the disk has the files.
+    |
+    | An encrypted file is always served through the application, which
+    | decrypts it — never by a direct address from the disk or a CDN.
+    */
+
+    'encryption' => [
+        'enabled' => (bool) env('MEDIA_KIT_ENCRYPT', false),
+
+        'keys' => env('MEDIA_KIT_KEYS', ''),
+
+        'current' => env('MEDIA_KIT_KEY_CURRENT', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Images
     |--------------------------------------------------------------------------
     |
@@ -122,6 +154,85 @@ return [
             'large' => 1.0,
             'medium' => 0.6,
             'small' => 0.3,
+        ],
+
+        /*
+        | How renditions are made. Every key below goes into the rendition's
+        | path, so changing one produces new files instead of serving the old
+        | ones forever; `media:prune` removes the files nothing asks for any
+        | more.
+        |
+        | 'quality' is per format, 1–100. A format left out uses the encoder's
+        | own default (75). PNG is lossless and has no quality.
+        |
+        | 'upscale' false keeps a rendition no larger than its original: a
+        | small photo stays small instead of being blown up and blurred, and
+        | the srcset says how wide it really is. True restores the old
+        | behaviour, where every rendition has exactly the asked-for size.
+        |
+        | 'crop_position' anchors the crop when the original's proportions
+        | differ from the asked-for ones: center, top, bottom, left, right,
+        | top-left, top-right, bottom-left, bottom-right.
+        |
+        | 'strip_metadata' drops EXIF — camera, time and GPS position — from
+        | renditions. A photo taken at home should not publish the address.
+        |
+        | 'progressive' writes progressive JPEG and interlaced PNG, which show
+        | a rough picture early on a slow connection.
+        |
+        | 'sharpen' (0–100) restores some edge contrast lost in downscaling;
+        | 0 leaves the picture as resized. Small values (5–15) are enough.
+        |
+        | 'resample' — 'lanczos' (Imagick) keeps fine detail — weave, stitching,
+        | small print — crisp when a picture is scaled down; 'default' is the
+        | library's plain scale. GD has one resampler and ignores this.
+        |
+        | 'srgb' converts a picture with an embedded colour profile (Display P3
+        | from a phone, Adobe RGB from a camera) to sRGB before anything else,
+        | so its colours survive the profile being stripped. Imagick only.
+        |
+        | 'version' changes nothing by itself: raise it to regenerate every
+        | rendition after something outside these keys changed — the driver,
+        | the library, the encoder build.
+        */
+        'quality' => [
+            'webp' => (int) env('MEDIA_KIT_QUALITY_WEBP', 82),
+            'jpg' => (int) env('MEDIA_KIT_QUALITY_JPG', 85),
+            'jpeg' => (int) env('MEDIA_KIT_QUALITY_JPG', 85),
+            'avif' => (int) env('MEDIA_KIT_QUALITY_AVIF', 60),
+        ],
+
+        'upscale' => (bool) env('MEDIA_KIT_UPSCALE', false),
+
+        'crop_position' => env('MEDIA_KIT_CROP_POSITION', 'center'),
+
+        'strip_metadata' => (bool) env('MEDIA_KIT_STRIP_METADATA', true),
+
+        'progressive' => (bool) env('MEDIA_KIT_PROGRESSIVE', true),
+
+        'sharpen' => (int) env('MEDIA_KIT_SHARPEN', 0),
+
+        'resample' => env('MEDIA_KIT_RESAMPLE', 'lanczos'),
+
+        'srgb' => (bool) env('MEDIA_KIT_SRGB', true),
+
+        'version' => (int) env('MEDIA_KIT_RENDITION_VERSION', 1),
+
+        /*
+        | The uploaded original itself. Nothing is done to it by default — it
+        | is stored exactly as it came. Set a limit and an original larger than
+        | it is scaled down, converted to sRGB and re-encoded at 'quality'
+        | before it is stored; set 'strip_metadata' and its EXIF (camera, time,
+        | GPS) goes too. An original within the limits and without stripping is
+        | never re-encoded: every lossy encode costs a little detail.
+        |
+        | JPEG, PNG, WebP and AVIF only; animated and archival formats are kept.
+        */
+        'original' => [
+            'max_width' => env('MEDIA_KIT_ORIGINAL_MAX_WIDTH'),
+            'max_height' => env('MEDIA_KIT_ORIGINAL_MAX_HEIGHT'),
+            'quality' => env('MEDIA_KIT_ORIGINAL_QUALITY', 92),
+            'strip_metadata' => (bool) env('MEDIA_KIT_ORIGINAL_STRIP_METADATA', false),
         ],
 
         /*

@@ -60,6 +60,10 @@ class MediaFile extends Model
         'height',
         'placeholder',
         'size',
+        'encryption',
+        'key_id',
+        'wrapped_key',
+        'checksum',
         'position',
         'is_public',
         'is_variant',
@@ -67,6 +71,12 @@ class MediaFile extends Model
         'locale',
         'parent_uuid',
     ];
+
+    /**
+     * A wrapped key is useless without the application key, but it has no
+     * business in an API payload or a log line either.
+     */
+    protected $hidden = ['wrapped_key'];
 
     protected $casts = [
         'type' => MediaType::class,

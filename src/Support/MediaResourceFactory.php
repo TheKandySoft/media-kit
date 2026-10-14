@@ -84,7 +84,7 @@ final class MediaResourceFactory
     {
         // The policy, not the disk: a caller's shorter lifetime has to reach the
         // store's own pre-signed link too, not only the signed route.
-        $url = $this->storage->disk($media->disk)->url($media->path, $policy->temporaryUrlExpiry());
+        $url = $this->storage->disk($media->disk)->url($media->path, $policy->temporaryUrlExpiry(), $media->encryption !== null);
 
         if ($url !== null) {
             return $url;
@@ -173,7 +173,7 @@ final class MediaResourceFactory
             // The path already contains the original's name, and replacing a
             // file gives it a new one, so this address needs no version of its
             // own: a replaced picture simply lives somewhere else.
-            if ($existing !== null && ($url = $disk->url($existing->path)) !== null) {
+            if ($existing !== null && ($url = $disk->url($existing->path, sealed: $existing->encryption !== null)) !== null) {
                 return $url;
             }
         }
@@ -191,12 +191,18 @@ final class MediaResourceFactory
         ], $policy->variantUrlExpiry());
     }
 
+    /**
+     * The stored rendition made with today's settings, if there is one.
+     *
+     * Matched by path, not by size: the path carries the rendition settings,
+     * and a file of the right size made at yesterday's quality is exactly the
+     * one that must not be served.
+     */
     private function storedVariant(MediaFile $media, VariantSize $variant): ?MediaFile
     {
-        return $media->variants
-            ->first(fn(MediaFile $stored): bool => $stored->width === $variant->width
-                && $stored->height === $variant->height
-                && $stored->extension === $variant->format);
+        $path = $this->variants->pathFor($media->path, $variant->width, $variant->height, $variant->format);
+
+        return $media->variants->first(fn(MediaFile $stored): bool => $stored->path === $path);
     }
 
     /**

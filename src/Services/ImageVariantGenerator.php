@@ -3,11 +3,14 @@
 namespace KandySoft\MediaKit\Services;
 
 use Illuminate\Contracts\Config\Repository as Config;
+use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\VariantSize;
 use KandySoft\MediaKit\Enums\MediaType;
+use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Storage\MediaDisk;
 use KandySoft\MediaKit\Support\ImageFactory;
+use KandySoft\MediaKit\Support\ImageOperations;
 
 /**
  * Produces resized renditions and remembers where they live.
@@ -23,6 +26,7 @@ final class ImageVariantGenerator
     public function __construct(
         private readonly ImageFactory $images,
         private readonly Config $config,
+        private readonly ImageOperations $operations,
     ) {}
 
     /**
@@ -47,10 +51,17 @@ final class ImageVariantGenerator
         $sizes = [];
 
         foreach ((array) $this->config->get('media-kit.image.variants', []) as $name => $multiplier) {
+            [$variantWidth, $variantHeight] = $this->fit(
+                (int) round($width * (float) $multiplier),
+                (int) round($height * (float) $multiplier),
+                $mediaWidth,
+                $mediaHeight,
+            );
+
             $sizes[] = new VariantSize(
                 name: (string) $name,
-                width: max(1, (int) round($width * (float) $multiplier)),
-                height: max(1, (int) round($height * (float) $multiplier)),
+                width: $variantWidth,
+                height: $variantHeight,
                 format: $format,
             );
         }
@@ -59,29 +70,116 @@ final class ImageVariantGenerator
     }
 
     /**
+     * Shrink a rendition that would be larger than its original.
+     *
+     * Enlarging cannot add detail, only blur: a 1200-pixel photo stretched to
+     * 2400 looks worse than the 1200 it was, and costs four times the bytes.
+     * The proportions are kept, so the crop is the same; only the scale stops
+     * at the original. Two variants may then end up the same size, and the
+     * srcset simply lists that width once.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function fit(int $width, int $height, ?int $mediaWidth, ?int $mediaHeight): array
+    {
+        $width = max(1, $width);
+        $height = max(1, $height);
+
+        if ($this->config->get('media-kit.image.upscale', false) || ! $mediaWidth || ! $mediaHeight) {
+            return [$width, $height];
+        }
+
+        $scale = min(1.0, $mediaWidth / $width, $mediaHeight / $height);
+
+        if ($scale >= 1.0) {
+            return [$width, $height];
+        }
+
+        return [max(1, (int) floor($width * $scale)), max(1, (int) floor($height * $scale))];
+    }
+
+    /**
      * Deterministic path, so the same size always maps to the same file and a
      * second request never regenerates what the first one produced.
+     *
+     * The settings that shape the pixels — quality, crop, metadata, sharpening
+     * — are part of it too. Otherwise a new quality would never reach a single
+     * picture: the path would be the same, the file would exist, and the old
+     * one would be served for good.
      */
     public function pathFor(string $originalPath, int $width, int $height, string $format): string
     {
         $format = $this->normaliseFormat($originalPath, $format);
         $root = trim((string) $this->config->get('media-kit.directory', 'media'), '/');
-        $hash = md5("{$originalPath}|{$width}x{$height}|{$format}");
+        $hash = md5("{$originalPath}|{$width}x{$height}|{$format}|{$this->profile($format)}");
 
         return "{$root}/variants/{$width}x{$height}/{$hash}.{$format}";
     }
 
+    /**
+     * Generate a rendition unless its file exists, for an original stored as
+     * it came. Kept for callers outside the package; the package itself uses
+     * `render()`, which also reads and writes encrypted files.
+     */
     public function generate(MediaDisk $disk, string $originalPath, string $variantPath, int $width, int $height, string $format): void
     {
         if ($disk->exists($variantPath)) {
             return;
         }
 
-        $image = $this->images->fromContents($disk->get($originalPath));
+        $disk->put($variantPath, $this->encode($disk->get($originalPath), $originalPath, $width, $height, $format));
+    }
 
-        $image->cover($width, $height);
+    /**
+     * Make a rendition of a stored original and write it — decrypting the
+     * original and encrypting the rendition where the disk asks for it.
+     *
+     * @return array{0: ?Envelope, 1: int, 2: string}  envelope, size and MIME type of the rendition
+     */
+    public function render(MediaDisk $disk, MediaFile $original, string $variantPath, int $width, int $height, string $format): array
+    {
+        $bytes = $this->encode(
+            $disk->read((string) $original->path, Envelope::of($original)),
+            (string) $original->path,
+            $width,
+            $height,
+            $format,
+        );
 
-        $disk->put($variantPath, (string) $image->encodeByExtension($this->normaliseFormat($originalPath, $format)));
+        $envelope = $disk->write($variantPath, $bytes);
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes) ?: 'application/octet-stream';
+
+        return [$envelope, strlen($bytes), $mime];
+    }
+
+    private function encode(string $original, string $originalPath, int $width, int $height, string $format): string
+    {
+        $format = $this->normaliseFormat($originalPath, $format);
+        $image = $this->images->fromContents($original);
+
+        // Colour first, before metadata goes: the profile it is converted by
+        // is stripped together with the rest.
+        $this->operations->toSrgb($image);
+        $this->operations->cover($image, $width, $height);
+
+        $sharpen = (int) $this->config->get('media-kit.image.sharpen', 0);
+
+        if ($sharpen > 0) {
+            $image->sharpen(min(100, $sharpen));
+        }
+
+        return (string) $image->encodeByExtension($format, ...$this->operations->encoderOptions($format));
+    }
+
+    /**
+     * Everything that decides how a rendition of this format looks.
+     */
+    private function profile(string $format): string
+    {
+        return json_encode([
+            $this->operations->encoderOptions($format),
+            $this->operations->fingerprint(),
+        ], JSON_THROW_ON_ERROR);
     }
 
     /**

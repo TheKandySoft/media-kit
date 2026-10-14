@@ -26,7 +26,17 @@ final readonly class MediaPolicy
         public ?int $variantUrlTtl,
         /** Seconds a served answer may be reused. */
         public int $cacheTtl,
+        /**
+         * Whether files written to this disk are encrypted. Such a disk hands
+         * out no direct addresses: the store would serve ciphertext.
+         */
+        public bool $encrypt = false,
     ) {}
+
+    public function withEncryption(bool $encrypt): self
+    {
+        return new self($this->public, $this->temporaryUrlTtl, $this->variantUrlTtl, $this->cacheTtl, $encrypt);
+    }
 
     public function temporaryUrlExpiry(): DateTimeInterface
     {

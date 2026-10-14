@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
+use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Support\SignedLinks;
@@ -86,7 +87,7 @@ class MediaController extends Controller
     private function serve(Request $request, MediaFile $media, string $disposition = 'inline'): Response
     {
         $disk = $this->storage->disk($media->disk);
-        $url = $disk->url($media->path);
+        $url = $disk->url($media->path, sealed: $media->encryption !== null);
         $headers = $this->cacheHeaders($request, $media);
 
         if ($url !== null && $disposition === 'inline') {
@@ -114,22 +115,132 @@ class MediaController extends Controller
             $disposition = 'attachment';
         }
 
+        $size = (int) ($media->size ?? $disk->size($media->path) ?? 0);
+        $range = $this->range($request, $size, $etag);
+
+        if ($range === false) {
+            return response('', 416, ['Content-Range' => "bytes */{$size}"] + $headers);
+        }
+
+        [$start, $end] = $range ?? [0, $size - 1];
+        $length = max(0, $end - $start + 1);
+
+        $headers += [
+            'Content-Type' => $mimeType,
+            // Without it a browser second-guesses the type from the bytes,
+            // which is exactly what the check above is there to prevent.
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, addslashes($filename)),
+            'Content-Length' => (string) $length,
+            'Accept-Ranges' => 'bytes',
+        ];
+
+        if ($range !== null) {
+            $headers['Content-Range'] = "bytes {$start}-{$end}/{$size}";
+        }
+
         return new StreamedResponse(
-            function () use ($disk, $media): void {
-                $stream = $disk->readStream($media->path);
-                fpassthru($stream);
-                fclose($stream);
+            function () use ($disk, $media, $start, $length): void {
+                // Decrypted on the way out when stored encrypted; the size is
+                // the plaintext's, which the record keeps.
+                $stream = $disk->openStream($media->path, Envelope::of($media));
+
+                try {
+                    self::skip($stream, $start);
+                    self::pass($stream, $length);
+                } finally {
+                    fclose($stream);
+                }
             },
-            200,
-            [
-                'Content-Type' => $mimeType,
-                // Without it a browser second-guesses the type from the bytes,
-                // which is exactly what the check above is there to prevent.
-                'X-Content-Type-Options' => 'nosniff',
-                'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, addslashes($filename)),
-                'Content-Length' => (string) ($media->size ?? $disk->size($media->path) ?? 0),
-            ] + $headers,
+            $range === null ? 200 : 206,
+            $headers,
         );
+    }
+
+    /**
+     * The one byte range asked for, null for the whole file, false when it
+     * cannot be satisfied.
+     *
+     * A video player and a PDF viewer ask for pieces: without ranges a seek
+     * in a video downloads it from the start, and on a phone that is the whole
+     * file before the first frame. One range covers every player in use; a
+     * request for several gets the whole file, which the standard allows.
+     *
+     * @return array{0: int, 1: int}|false|null
+     */
+    private function range(Request $request, int $size, string $etag): array|false|null
+    {
+        $header = (string) $request->headers->get('Range', '');
+
+        if ($header === '' || $size <= 0 || ! preg_match('/^bytes=(\d*)-(\d*)$/', trim($header), $match)) {
+            return null;
+        }
+
+        // A range of a version the client no longer has would splice two files.
+        $ifRange = (string) $request->headers->get('If-Range', '');
+
+        if ($ifRange !== '' && $ifRange !== $etag) {
+            return null;
+        }
+
+        if ($match[1] === '' && $match[2] === '') {
+            return null;
+        }
+
+        if ($match[1] === '') {
+            // The last N bytes.
+            $start = max(0, $size - (int) $match[2]);
+            $end = $size - 1;
+        } else {
+            $start = (int) $match[1];
+            $end = $match[2] === '' ? $size - 1 : min((int) $match[2], $size - 1);
+        }
+
+        return $start > $end || $start >= $size ? false : [$start, $end];
+    }
+
+    /**
+     * @param  resource  $stream
+     */
+    private static function skip($stream, int $bytes): void
+    {
+        if ($bytes <= 0) {
+            return;
+        }
+
+        $meta = stream_get_meta_data($stream);
+
+        if (($meta['seekable'] ?? false) && fseek($stream, $bytes) === 0) {
+            return;
+        }
+
+        // An object store's stream does not seek: read past what was not asked for.
+        while ($bytes > 0 && ! feof($stream)) {
+            $chunk = fread($stream, min(65536, $bytes));
+
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+
+            $bytes -= strlen($chunk);
+        }
+    }
+
+    /**
+     * @param  resource  $stream
+     */
+    private static function pass($stream, int $bytes): void
+    {
+        while ($bytes > 0 && ! feof($stream)) {
+            $chunk = fread($stream, min(65536, $bytes));
+
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+
+            echo $chunk;
+            $bytes -= strlen($chunk);
+        }
     }
 
     /**
