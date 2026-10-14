@@ -40,6 +40,24 @@ function halvesPng(int $width, int $height): string
  * A JPEG carrying an EXIF block with a recognisable marker — what a phone puts
  * there is the place and the time the photo was taken.
  */
+function texturePng(int $width, int $height): string
+{
+    $image = imagecreatetruecolor($width, $height);
+    mt_srand(11);
+
+    for ($x = 0; $x < $width; $x += 4) {
+        for ($y = 0; $y < $height; $y += 4) {
+            $grey = mt_rand(40, 215);
+            imagefilledrectangle($image, $x, $y, $x + 3, $y + 3, imagecolorallocate($image, $grey, $grey, $grey));
+        }
+    }
+
+    ob_start();
+    imagepng($image);
+
+    return (string) ob_get_clean();
+}
+
 function jpegWithExif(int $width, int $height, string $marker = 'GPS-48.4647N-35.0462E'): UploadedFile
 {
     $image = imagecreatetruecolor($width, $height);
@@ -170,7 +188,9 @@ it('sharpens a rendition when asked to', function (string $driver) {
 
     useDriver($driver);
     $media = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.png', 400, 400)));
-    Storage::disk('public')->put($media->path, halvesPng(400, 400));
+    // Fine texture, not flat colour: a clean edge between two flat fields is
+    // already as sharp as it gets, and some GD builds leave it byte for byte.
+    Storage::disk('public')->put($media->path, texturePng(400, 400));
 
     config(['media-kit.image.sharpen' => 0, 'media-kit.image.quality.png' => 100]);
     $plain = app(MediaWriter::class)->ensureVariant($media, 100, 100, 'png');
