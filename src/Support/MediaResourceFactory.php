@@ -72,6 +72,7 @@ final class MediaResourceFactory
             variants: $media->type->isImage() ? $this->variants($media, $size, $policy) : [],
             captions: $captions,
             placeholder: $media->placeholder,
+            crop: $media->type->isImage() ? $media->crop : null,
         );
     }
 
@@ -135,7 +136,7 @@ final class MediaResourceFactory
         $disk = $this->storage->disk($media->disk);
         $variants = [];
 
-        foreach ($this->variants->sizesFor($media->width, $media->height, $size) as $variant) {
+        foreach ($this->variants->sizesFor($media->width, $media->height, $size, $media->crop) as $variant) {
             $url = $this->variantUrl($media, $variant, $policy, $disk);
 
             if ($url === null) {
@@ -200,7 +201,7 @@ final class MediaResourceFactory
      */
     private function storedVariant(MediaFile $media, VariantSize $variant): ?MediaFile
     {
-        $path = $this->variants->pathFor($media->path, $variant->width, $variant->height, $variant->format);
+        $path = $this->variants->pathFor($media->path, $variant->width, $variant->height, $variant->format, $media->crop);
 
         return $media->variants->first(fn(MediaFile $stored): bool => $stored->path === $path);
     }

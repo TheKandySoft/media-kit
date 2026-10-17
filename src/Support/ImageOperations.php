@@ -6,6 +6,7 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Imagick;
 use Intervention\Image\Interfaces\ImageInterface;
 use Intervention\Image\Modifiers\CoverModifier;
+use KandySoft\MediaKit\Data\MediaCrop;
 use Throwable;
 
 /**
@@ -67,14 +68,24 @@ final class ImageOperations
     }
 
     /**
-     * Crop to the asked-for proportions at the configured anchor and resize.
+     * Crop to the asked-for proportions and resize.
+     *
+     * The frame is the one a person chose for this file when there is one, and
+     * otherwise cut at the configured anchor.
      *
      * With Imagick and `resample = lanczos` the resize uses the Lanczos filter
      * rather than the library's plain scale — the difference is fine detail:
      * fabric weave, stitching, print on a label stay crisp instead of going soft.
      */
-    public function cover(ImageInterface $image, int $width, int $height): void
+    public function cover(ImageInterface $image, int $width, int $height, ?MediaCrop $area = null): void
     {
+        if ($area !== null && ! $area->isWhole()) {
+            $frame = $area->frame($image->width(), $image->height(), $width / max(1, $height));
+            $this->cut($image, $frame['width'], $frame['height'], $frame['x'], $frame['y'], $width, $height);
+
+            return;
+        }
+
         $position = $this->cropPosition();
 
         if (! $this->usesLanczos($image)) {
@@ -85,13 +96,26 @@ final class ImageOperations
 
         $crop = (new CoverModifier($width, $height, $position))->getCropSize($image);
 
-        foreach ($image as $frame) {
-            /** @var Imagick $native */
-            $native = $frame->native();
-            $native->cropImage($crop->width(), $crop->height(), $crop->pivot()->x(), $crop->pivot()->y());
-            $native->setImagePage(0, 0, 0, 0);
-            $native->resizeImage($width, $height, Imagick::FILTER_LANCZOS, 1);
+        $this->cut($image, $crop->width(), $crop->height(), $crop->pivot()->x(), $crop->pivot()->y(), $width, $height);
+    }
+
+    /**
+     * Only the chosen area of a picture, at its own size.
+     *
+     * What stands in for the whole picture where the whole would mislead: the
+     * blurred copy shown while the real one arrives has to be of the part that
+     * arrives.
+     */
+    public function area(ImageInterface $image, MediaCrop $area): void
+    {
+        if ($area->isWhole()) {
+            return;
         }
+
+        [$width, $height] = $area->size($image->width(), $image->height());
+        $frame = $area->frame($image->width(), $image->height(), $width / $height);
+
+        $image->crop($frame['width'], $frame['height'], $frame['x'], $frame['y']);
     }
 
     /**
@@ -140,6 +164,23 @@ final class ImageOperations
             'sharpen' => (int) $this->config->get('media-kit.image.sharpen', 0),
             'version' => (int) $this->config->get('media-kit.image.version', 1),
         ];
+    }
+
+    private function cut(ImageInterface $image, int $cropWidth, int $cropHeight, int $x, int $y, int $width, int $height): void
+    {
+        if (! $this->usesLanczos($image)) {
+            $image->crop($cropWidth, $cropHeight, $x, $y)->resize($width, $height);
+
+            return;
+        }
+
+        foreach ($image as $frame) {
+            /** @var Imagick $native */
+            $native = $frame->native();
+            $native->cropImage($cropWidth, $cropHeight, $x, $y);
+            $native->setImagePage(0, 0, 0, 0);
+            $native->resizeImage($width, $height, Imagick::FILTER_LANCZOS, 1);
+        }
     }
 
     private function usesLanczos(ImageInterface $image): bool

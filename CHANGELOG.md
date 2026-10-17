@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.8.0
+
+### Chosen area
+
+A rendition was cut from the middle of its original, or from one anchor for every file. A wide
+photo asked for as a tall card showed whatever stood in the middle, and nothing could say which
+part mattered.
+
+- **`MediaCrop`** — the part of a picture to be seen, in fractions of the original; the original
+  stays whole. Kept in a new `media_files.crop` column (migration `add_media_crop`).
+- **`MediaWriter::crop()`**, and a `crop` on `MediaUpload::file()` / `keep()` / `fromArray()`. Null
+  on `keep()` leaves the area alone, `MediaCrop::whole()` takes it away. `replace()` drops it,
+  `copy()` carries it.
+- **Renditions are cut from the area**: exactly the area at its own proportions, the smallest frame
+  holding it at others. A free side of `ImageSize` follows the area. The area is part of the
+  rendition's path — only when there is one, so every existing path stays as it was. Renditions
+  cut before a change stay on disk for cached pages until `media:prune`.
+- **The placeholder** is drawn from the area.
+- **`focus`** in the payload (and `MediaResource::focus()`): where the area's centre sits in the
+  renditions, for `object-position` in a box of other proportions. Absent without an area.
+- `ImageVariantGenerator::sizesFor()` and `pathFor()` take the area as a new optional argument.
+
 ## 1.7.0
 
 ### Rendition quality

@@ -37,6 +37,8 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
         public array $captions = [],
         /** A tiny copy as a `data:` URI — what is seen while the real one arrives. */
         public ?string $placeholder = null,
+        /** The part a person chose to be seen, in fractions of the original. */
+        public ?MediaCrop $crop = null,
     ) {}
 
     public function aspect(): ?float
@@ -49,6 +51,33 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
     public function variant(string $name): ?ImageVariant
     {
         return $this->variants[$name] ?? null;
+    }
+
+    /**
+     * Where the chosen part sits inside the renditions, in fractions of them —
+     * for a page that shows a rendition in a box of other proportions and
+     * would otherwise keep its middle. Null without a chosen part, when the
+     * middle is right.
+     *
+     * Every rendition of one read has the same proportions, so one point
+     * serves them all.
+     *
+     * @return array{x: float, y: float}|null
+     */
+    public function focus(): ?array
+    {
+        if ($this->crop === null || ! $this->width || ! $this->height) {
+            return null;
+        }
+
+        $variant = array_values($this->variants)[0] ?? null;
+
+        [$areaWidth, $areaHeight] = $this->crop->size($this->width, $this->height);
+        $ratio = $variant instanceof ImageVariant && $variant->height > 0
+            ? $variant->width / $variant->height
+            : $areaWidth / $areaHeight;
+
+        return $this->crop->focus($this->width, $this->height, $ratio);
     }
 
     /**
@@ -138,6 +167,10 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
 
         if ($this->placeholder !== null) {
             $payload['placeholder'] = $this->placeholder;
+        }
+
+        if (($focus = $this->focus()) !== null) {
+            $payload['focus'] = $focus;
         }
 
         return $payload;

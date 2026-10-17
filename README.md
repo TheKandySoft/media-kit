@@ -114,6 +114,12 @@ Captions change without the file:
 $this->media->caption($logo->uuid, [new MediaCaption('uk', alt: 'Логотип', title: 'Бренд')]);
 ```
 
+So does the part of a picture its renditions show — see [chosen area](docs/usage.md#chosen-area):
+
+```php
+$this->media->crop($photo->uuid, MediaCrop::of(x: 0.55, y: 0.0, width: 0.45, height: 1.0));
+```
+
 ## Reading
 
 ```php
@@ -131,6 +137,7 @@ $images[0]->url;                       // the original
 $images[0]->variant('medium')?->url;   // one rendition
 $images[0]->srcset();                  // all of them, for the browser to choose from
 $images[0]->placeholder;               // a tiny data: URI to show meanwhile
+$images[0]->focus();                   // where the chosen area sits in the renditions, or null
 $images[0]->caption?->alt;
 ```
 
@@ -192,7 +199,7 @@ URLs, not in the payloads clients receive.
 ## Rendition quality
 
 Every setting that shapes the pixels — quality, crop anchor, metadata, sharpening and
-`image.version` — is part of a rendition's path. Changing one does not overwrite anything: the
+`image.version` — is part of a rendition's path, and so is a file's chosen area. Changing one does not overwrite anything: the
 next request for a size makes a new file at a new path, and the old file is simply no longer
 asked for. Renditions are matched by that path, so a file of the right size made at yesterday's
 quality is never served again.

@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Str;
+use KandySoft\MediaKit\Casts\AsMediaCrop;
+use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Enums\MediaType;
 
 /**
@@ -28,6 +30,7 @@ use KandySoft\MediaKit\Enums\MediaType;
  * @property int|null $width
  * @property int|null $height
  * @property string|null $placeholder
+ * @property MediaCrop|null $crop  the part chosen to be seen; null for the whole picture
  * @property int|null $size
  * @property int $position
  * @property bool $is_public
@@ -59,6 +62,7 @@ class MediaFile extends Model
         'width',
         'height',
         'placeholder',
+        'crop',
         'size',
         'encryption',
         'key_id',
@@ -86,6 +90,7 @@ class MediaFile extends Model
         'height' => 'integer',
         'size' => 'integer',
         'position' => 'integer',
+        'crop' => AsMediaCrop::class,
     ];
 
     protected static function booted(): void

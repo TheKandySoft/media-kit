@@ -56,7 +56,7 @@ class RegenerateMediaVariants extends Command
                 continue;
             }
 
-            $current = $generator->pathFor((string) $parent->path, (int) $variant->width, (int) $variant->height, (string) $variant->extension);
+            $current = $generator->pathFor((string) $parent->path, (int) $variant->width, (int) $variant->height, (string) $variant->extension, $parent->crop);
 
             if ($current === $variant->path) {
                 continue;

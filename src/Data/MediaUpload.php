@@ -11,6 +11,9 @@ use InvalidArgumentException;
  * Either a new file to store, or the UUID of one already stored that should
  * survive the sync — anything absent from the list is deleted. Captions travel
  * with the entry so a single call can create the file and its translations.
+ *
+ * So does the chosen area. Null leaves the file's area as it is; the whole
+ * picture (`MediaCrop::whole()`) takes it away.
  */
 final readonly class MediaUpload
 {
@@ -23,6 +26,7 @@ final readonly class MediaUpload
         public ?string $tag,
         public ?string $locale,
         public array $captions,
+        public ?MediaCrop $crop = null,
     ) {
         if ($this->file === null && $this->uuid === null) {
             throw new InvalidArgumentException('A media upload needs either a file to store or the uuid of one to keep.');
@@ -37,8 +41,9 @@ final readonly class MediaUpload
         ?string $tag = null,
         ?string $locale = null,
         array $captions = [],
+        ?MediaCrop $crop = null,
     ): self {
-        return new self($file, null, $tag, $locale, $captions);
+        return new self($file, null, $tag, $locale, $captions, $crop);
     }
 
     /**
@@ -49,14 +54,16 @@ final readonly class MediaUpload
         ?string $tag = null,
         ?string $locale = null,
         array $captions = [],
+        ?MediaCrop $crop = null,
     ): self {
-        return new self(null, $uuid, $tag, $locale, $captions);
+        return new self(null, $uuid, $tag, $locale, $captions, $crop);
     }
 
     /**
-     * Build from the shape a form posts: a file input plus optional captions.
+     * Build from the shape a form posts: a file input plus optional captions
+     * and area.
      *
-     * @param  array{file?: UploadedFile|null, uuid?: string|null, tag?: string|null, locale?: string|null, captions?: array<string, array{alt?: string|null, title?: string|null}>}  $item
+     * @param  array{file?: UploadedFile|null, uuid?: string|null, tag?: string|null, locale?: string|null, captions?: array<string, array{alt?: string|null, title?: string|null}>, crop?: array{x: float, y: float, width: float, height: float}|null}  $item
      */
     public static function fromArray(array $item): self
     {
@@ -67,10 +74,11 @@ final readonly class MediaUpload
         }
 
         $file = $item['file'] ?? null;
+        $crop = MediaCrop::fromArray($item['crop'] ?? null);
 
         return $file instanceof UploadedFile
-            ? self::file($file, $item['tag'] ?? null, $item['locale'] ?? null, $captions)
-            : self::keep((string) ($item['uuid'] ?? ''), $item['tag'] ?? null, $item['locale'] ?? null, $captions);
+            ? self::file($file, $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop)
+            : self::keep((string) ($item['uuid'] ?? ''), $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop);
     }
 
     public function isNewFile(): bool

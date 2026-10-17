@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
+use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Models\MediaFile;
@@ -33,7 +34,8 @@ interface MediaWriter
      *
      * The identifier survives, so anything already pointing at this media —
      * a settings value, a cached payload, a printed link — keeps working. The
-     * old file and every variant generated from it are removed.
+     * old file and every variant generated from it are removed, and so is the
+     * area chosen on it: it was chosen for another picture.
      *
      * @param  array<int, MediaCaption>  $captions  replaces the existing ones when given
      */
@@ -51,6 +53,18 @@ interface MediaWriter
      * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
      */
     public function caption(string $uuid, array $captions): MediaFile;
+
+    /**
+     * Choose the part of a picture its renditions show, leaving the original
+     * whole. The whole picture, or null, takes the choice away.
+     *
+     * Renditions are cut again on the next request: the area is part of their
+     * address. Those cut before stay on the disk for pages that still point at
+     * them, until `media:prune` finds nothing asks for them any more.
+     *
+     * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
+     */
+    public function crop(string $uuid, ?MediaCrop $crop): MediaFile;
 
     /**
      * Register a file that is already sitting on a disk.

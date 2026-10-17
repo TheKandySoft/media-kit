@@ -119,6 +119,7 @@ class PruneMediaVariants extends Command
             (int) $variant->width,
             (int) $variant->height,
             (string) $variant->extension,
+            $parent->crop,
         );
 
         if ($variant->path !== $current) {
@@ -129,7 +130,7 @@ class PruneMediaVariants extends Command
             return null;
         }
 
-        foreach ($generator->sizesFor($parent->width, $parent->height, $requested) as $current) {
+        foreach ($generator->sizesFor($parent->width, $parent->height, $requested, $parent->crop) as $current) {
             if ($this->matches($variant, $current)) {
                 return null;
             }

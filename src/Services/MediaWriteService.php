@@ -15,6 +15,7 @@ use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
+use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaType;
@@ -27,6 +28,7 @@ use KandySoft\MediaKit\Storage\MediaDisk;
 use KandySoft\MediaKit\Storage\TemporaryFile;
 use KandySoft\MediaKit\Support\ImageFactory;
 use KandySoft\MediaKit\Support\ImageIntake;
+use KandySoft\MediaKit\Support\ImageOperations;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\PlaceholderFactory;
 use Throwable;
@@ -43,6 +45,7 @@ final class MediaWriteService implements MediaWriter
         private readonly Config $config,
         private readonly Cache $cache,
         private readonly ImageIntake $intake,
+        private readonly ImageOperations $operations,
     ) {}
 
     /**
@@ -78,6 +81,11 @@ final class MediaWriteService implements MediaWriter
             ]);
 
             $this->writeCaptions($file, $upload->captions);
+
+            if ($upload->crop !== null) {
+                $this->cropFile($file, $upload->crop);
+            }
+
             $kept[] = $file->uuid;
         }
 
@@ -101,7 +109,7 @@ final class MediaWriteService implements MediaWriter
         if ($local !== null) {
             try {
                 return $this->store(
-                    MediaUpload::file($local->toUploadedFile($file->getClientOriginalName()), $upload->tag, $upload->locale, $upload->captions),
+                    MediaUpload::file($local->toUploadedFile($file->getClientOriginalName()), $upload->tag, $upload->locale, $upload->captions, $upload->crop),
                     $model,
                     $disk,
                 );
@@ -154,6 +162,10 @@ final class MediaWriteService implements MediaWriter
         ]);
 
         $this->writeCaptions($record, $upload->captions);
+
+        if ($upload->crop !== null) {
+            $this->cropFile($record, $upload->crop);
+        }
 
         return $record;
     }
@@ -209,6 +221,7 @@ final class MediaWriteService implements MediaWriter
             'width' => $intake->width,
             'height' => $intake->height,
             'placeholder' => $intake->placeholder,
+            'crop' => null,
             'size' => $envelope?->size ?? $size,
             ...Envelope::changes($envelope, $existing),
             'is_public' => $disk->isPublic(),
@@ -246,6 +259,15 @@ final class MediaWriteService implements MediaWriter
         }
 
         return $file->load('captions');
+    }
+
+    public function crop(string $uuid, ?MediaCrop $crop): MediaFile
+    {
+        $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
+
+        $this->cropFile($file, $crop ?? MediaCrop::whole());
+
+        return $file;
     }
 
     public function adopt(string $path, ?string $disk = null, ?string $tag = null): MediaFile
@@ -308,6 +330,7 @@ final class MediaWriteService implements MediaWriter
                         tag: $original->tag,
                         locale: $original->locale,
                         captions: $this->captionsOf($original),
+                        crop: $original->crop,
                     ),
                     $to,
                     $original->disk,
@@ -404,7 +427,7 @@ final class MediaWriteService implements MediaWriter
 
         $warmed = [];
 
-        foreach ($this->variants->sizesFor($media->width, $media->height, $size) as $variant) {
+        foreach ($this->variants->sizesFor($media->width, $media->height, $size, $media->crop) as $variant) {
             $warmed[] = $this->ensureVariant($media, $variant->width, $variant->height, $variant->format);
         }
 
@@ -414,7 +437,7 @@ final class MediaWriteService implements MediaWriter
     public function ensureVariant(MediaFile $original, int $width, int $height, string $format): MediaFile
     {
         $disk = $this->storage->disk($original->disk);
-        $path = $this->variants->pathFor($original->path, $width, $height, $format);
+        $path = $this->variants->pathFor($original->path, $width, $height, $format, $original->crop);
 
         return $this->exclusively("{$disk->name()}:{$path}", function () use ($original, $disk, $path, $width, $height, $format): MediaFile {
             $existing = $this->media->findByPath($disk->name(), $path);
@@ -489,6 +512,59 @@ final class MediaWriteService implements MediaWriter
         }
 
         return $store->lock('media-kit:' . md5($name), 30)->block(15, $work);
+    }
+
+    /**
+     * Give a file its area — and the placeholder of that area, since the
+     * blurred copy shown before a rendition arrives has to be of what arrives.
+     *
+     * Nothing else changes, and the renditions cut before stay: the area is in
+     * their path, so they are simply not asked for again, while a page cached
+     * with their address still shows a picture. The record's timestamp moves,
+     * and with it the version in every address not yet cut.
+     */
+    private function cropFile(MediaFile $file, MediaCrop $crop): void
+    {
+        $crop = $crop->isWhole() ? null : $crop;
+
+        if ($crop === null ? $file->crop === null : $crop->equals($file->crop)) {
+            return;
+        }
+
+        $file->update([
+            'crop' => $crop,
+            'placeholder' => $this->placeholderOf($file, $crop) ?? $file->placeholder,
+        ]);
+    }
+
+    /**
+     * The placeholder of a stored picture, of its area alone when it has one.
+     * None for an encrypted file — a readable copy in the database would undo
+     * the encryption — and none when the picture cannot be read.
+     */
+    private function placeholderOf(MediaFile $file, ?MediaCrop $crop): ?string
+    {
+        if (! $file->type->isImage()) {
+            return null;
+        }
+
+        $disk = $this->storage->disk($file->disk);
+
+        if ($disk->encrypts()) {
+            return null;
+        }
+
+        try {
+            $image = $this->images->fromContents($disk->read((string) $file->path, Envelope::of($file)));
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($crop !== null) {
+            $this->operations->area($image, $crop);
+        }
+
+        return $this->placeholders->forImage($image);
     }
 
     /**

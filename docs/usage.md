@@ -66,6 +66,42 @@ $writer->caption($image->uuid, [
 
 The address does not change — the bytes behind it did not.
 
+## Chosen area
+
+A rendition is cut from its original to the proportions it is asked for — by default from the
+middle (`image.crop_position`). A wide photo asked for as a tall card then shows whatever stands in
+the middle. `MediaCrop` lets a person choose instead:
+
+```php
+use KandySoft\MediaKit\Data\MediaCrop;
+
+$writer->crop($photo->uuid, MediaCrop::of(x: 0.55, y: 0.0, width: 0.45, height: 1.0));
+$writer->crop($photo->uuid, MediaCrop::whole());   // back to the middle; null does the same
+
+MediaUpload::file($request->file('photo'), crop: MediaCrop::of(0.2, 0.0, 0.5, 1.0));
+MediaUpload::keep($uuid, crop: $crop);             // null leaves the area as it is
+```
+
+The area is in fractions of the original, and the original stays whole: proportions change, and a
+picture cut for yesterday's card could not be uncut for tomorrow's.
+
+- Asked for at **the area's own proportions**, a rendition is exactly the area.
+- Asked for at **other proportions**, it is the smallest frame of those proportions that holds the
+  area, centred on it — and where the original is too small for that, the largest it has, still
+  centred on the area.
+- A **free side** (`ImageSize::of(1920, null)`) follows the area's proportions, not the original's.
+- The **placeholder** is drawn from the area.
+
+The area is part of a rendition's path. Changing it cuts new renditions on the next request and
+leaves the old files for pages that still point at them; `media:prune` removes them once nothing
+asks for them. `replace()` drops the area — it was chosen for another picture — and `copy()` carries
+it over.
+
+A page that shows a rendition in a box of yet other proportions — a fixed-height banner, a tile
+that changes shape on a phone — reads `focus` from the payload: where the area's centre sits in the
+rendition, in fractions. As `object-position: {x*100}% {y*100}%` it keeps the chosen part in view.
+It is absent for a file without an area, where the middle is right.
+
 ## Reading
 
 ```php
@@ -106,6 +142,8 @@ $image->caption?->alt;           // in the requested locale
 $image->captions['en']->title;   // every locale
 $image->variant('medium')?->url;
 $image->aspect();
+$image->crop;                    // the chosen area, or null
+$image->focus();                 // ['x' => 0.5, 'y' => 0.3] inside the renditions, or null
 ```
 
 Disk names, storage paths and owner ids are not part of it, by design.

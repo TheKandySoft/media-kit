@@ -5,6 +5,7 @@ namespace KandySoft\MediaKit\Services;
 use Illuminate\Contracts\Config\Repository as Config;
 use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Data\ImageSize;
+use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\VariantSize;
 use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Models\MediaFile;
@@ -36,16 +37,27 @@ final class ImageVariantGenerator
      * generating it have to agree on the numbers, and they used to work them
      * out separately.
      *
+     * With a chosen area the area is the picture: a side left free follows its
+     * proportions, and no rendition is larger than the frame it is cut from.
+     *
      * @return list<VariantSize>
      */
-    public function sizesFor(?int $mediaWidth, ?int $mediaHeight, ImageSize $requested): array
+    public function sizesFor(?int $mediaWidth, ?int $mediaHeight, ImageSize $requested, ?MediaCrop $area = null): array
     {
+        $area = $mediaWidth && $mediaHeight && $area !== null && ! $area->isWhole() ? $area : null;
+        [$visibleWidth, $visibleHeight] = $area?->size((int) $mediaWidth, (int) $mediaHeight) ?? [$mediaWidth, $mediaHeight];
+
         [$width, $height] = $requested->resolve(
-            $mediaWidth,
-            $mediaHeight,
+            $visibleWidth,
+            $visibleHeight,
             (int) $this->config->get('media-kit.image.default_width', 300),
             (int) $this->config->get('media-kit.image.default_height', 300),
         );
+
+        if ($area !== null) {
+            $frame = $area->frame((int) $mediaWidth, (int) $mediaHeight, $width / max(1, $height));
+            [$mediaWidth, $mediaHeight] = [$frame['width'], $frame['height']];
+        }
 
         $format = $requested->format ?? (string) $this->config->get('media-kit.image.format', 'webp');
         $sizes = [];
@@ -106,12 +118,16 @@ final class ImageVariantGenerator
      * — are part of it too. Otherwise a new quality would never reach a single
      * picture: the path would be the same, the file would exist, and the old
      * one would be served for good.
+     *
+     * So is the chosen area — only when there is one, which leaves the path of
+     * every rendition made before areas existed as it was.
      */
-    public function pathFor(string $originalPath, int $width, int $height, string $format): string
+    public function pathFor(string $originalPath, int $width, int $height, string $format, ?MediaCrop $area = null): string
     {
         $format = $this->normaliseFormat($originalPath, $format);
         $root = trim((string) $this->config->get('media-kit.directory', 'media'), '/');
-        $hash = md5("{$originalPath}|{$width}x{$height}|{$format}|{$this->profile($format)}");
+        $crop = $area !== null && ! $area->isWhole() ? "|crop:{$area->key()}" : '';
+        $hash = md5("{$originalPath}|{$width}x{$height}|{$format}|{$this->profile($format)}{$crop}");
 
         return "{$root}/variants/{$width}x{$height}/{$hash}.{$format}";
     }
@@ -144,6 +160,7 @@ final class ImageVariantGenerator
             $width,
             $height,
             $format,
+            $original->crop,
         );
 
         $envelope = $disk->write($variantPath, $bytes);
@@ -152,7 +169,7 @@ final class ImageVariantGenerator
         return [$envelope, strlen($bytes), $mime];
     }
 
-    private function encode(string $original, string $originalPath, int $width, int $height, string $format): string
+    private function encode(string $original, string $originalPath, int $width, int $height, string $format, ?MediaCrop $area = null): string
     {
         $format = $this->normaliseFormat($originalPath, $format);
         $image = $this->images->fromContents($original);
@@ -160,7 +177,7 @@ final class ImageVariantGenerator
         // Colour first, before metadata goes: the profile it is converted by
         // is stripped together with the rest.
         $this->operations->toSrgb($image);
-        $this->operations->cover($image, $width, $height);
+        $this->operations->cover($image, $width, $height, $area);
 
         $sharpen = (int) $this->config->get('media-kit.image.sharpen', 0);
 
