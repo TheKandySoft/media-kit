@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.0
+
+- **`Services\VariantPruner`** — cleaning up from the application instead of a scheduled
+  `media:prune`. `stale(?uuid)` deletes renditions made with settings that have since changed
+  (quality, sharpening, a file's area); `retired(old, current, modelType, tag)` deletes the ones a
+  size the application stopped asking for produced, keeping any the current size shares and the
+  same picture's renditions at other sizes. Neither checks for links: call them once whatever links
+  to renditions directly has been rebuilt.
+- `media:prune` judges "made with other settings" through the same check.
+
 ## 1.9.0
 
 - **`Contracts\RenditionQuality`** — where the quality of a rendition comes from. The default,

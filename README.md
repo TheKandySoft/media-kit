@@ -219,7 +219,10 @@ quality is never served again.
   metadata to go — then it is scaled down, converted and re-encoded once, on upload.
 - **`media:regenerate`** makes the renditions again right away instead of on first request.
 - **After changing the settings**, rebuild whatever links to renditions directly (a catalogue
-  index that warmed them), then run `media:prune` to delete the files made with the old ones.
+  index that warmed them), then run `media:prune` to delete the files made with the old ones —
+  or let the application do it: `VariantPruner::stale()` deletes renditions made with other
+  settings (one file's, after its area changed, or all), and `VariantPruner::retired()` those of a
+  size it stopped asking for, for one kind of file.
 
 ## Commands
 

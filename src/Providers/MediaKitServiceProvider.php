@@ -24,6 +24,7 @@ use KandySoft\MediaKit\Repositories\MediaFileRepository;
 use KandySoft\MediaKit\Services\ImageVariantGenerator;
 use KandySoft\MediaKit\Services\MediaReadService;
 use KandySoft\MediaKit\Services\MediaWriteService;
+use KandySoft\MediaKit\Services\VariantPruner;
 use KandySoft\MediaKit\Storage\MediaStorageManager;
 use KandySoft\MediaKit\Support\ConfiguredRenditionQuality;
 use KandySoft\MediaKit\Support\ImageFactory;
@@ -60,6 +61,8 @@ class MediaKitServiceProvider extends ServiceProvider
 
         $this->app->singleton(MediaWriteService::class);
         $this->app->alias(MediaWriteService::class, MediaWriter::class);
+
+        $this->app->singleton(VariantPruner::class);
 
         $this->app->singleton(MediaReadService::class);
         $this->app->alias(MediaReadService::class, MediaReader::class);

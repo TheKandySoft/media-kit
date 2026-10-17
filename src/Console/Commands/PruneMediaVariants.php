@@ -9,6 +9,7 @@ use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\VariantSize;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Services\ImageVariantGenerator;
+use KandySoft\MediaKit\Services\VariantPruner;
 
 /**
  * Removes renditions nobody will ask for again.
@@ -114,15 +115,7 @@ class PruneMediaVariants extends Command
         // The path carries the rendition settings. A file whose path is not
         // the one today's settings would give it was made at another quality
         // or crop, and nothing will ask for it again.
-        $current = $generator->pathFor(
-            (string) $parent->path,
-            (int) $variant->width,
-            (int) $variant->height,
-            (string) $variant->extension,
-            $parent->crop,
-        );
-
-        if ($variant->path !== $current) {
+        if (app(VariantPruner::class)->isStale($variant)) {
             return 'made with other rendition settings';
         }
 
