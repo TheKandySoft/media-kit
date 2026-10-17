@@ -6,6 +6,7 @@ use Illuminate\Contracts\Config\Repository as Config;
 use Imagick;
 use Intervention\Image\Interfaces\ImageInterface;
 use Intervention\Image\Modifiers\CoverModifier;
+use KandySoft\MediaKit\Contracts\RenditionQuality;
 use KandySoft\MediaKit\Data\MediaCrop;
 use Throwable;
 
@@ -26,7 +27,10 @@ final class ImageOperations
         'top-left', 'top-right', 'bottom-left', 'bottom-right',
     ];
 
-    public function __construct(private readonly Config $config) {}
+    public function __construct(
+        private readonly Config $config,
+        private readonly RenditionQuality $quality,
+    ) {}
 
     /**
      * Convert a picture with an embedded colour profile to sRGB.
@@ -134,7 +138,7 @@ final class ImageOperations
             'interlaced' => $progressive,
         ];
 
-        $quality ??= is_numeric($value = $this->config->get("media-kit.image.quality.{$format}")) ? (int) $value : null;
+        $quality ??= $this->quality->for($format);
 
         if ($quality !== null) {
             $options['quality'] = max(1, min(100, $quality));

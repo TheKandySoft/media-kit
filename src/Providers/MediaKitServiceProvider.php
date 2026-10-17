@@ -17,6 +17,7 @@ use KandySoft\MediaKit\Contracts\KeyProvider;
 use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
+use KandySoft\MediaKit\Contracts\RenditionQuality;
 use KandySoft\MediaKit\Encryption\ConfigKeyring;
 use KandySoft\MediaKit\Encryption\FileCipher;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
@@ -24,6 +25,7 @@ use KandySoft\MediaKit\Services\ImageVariantGenerator;
 use KandySoft\MediaKit\Services\MediaReadService;
 use KandySoft\MediaKit\Services\MediaWriteService;
 use KandySoft\MediaKit\Storage\MediaStorageManager;
+use KandySoft\MediaKit\Support\ConfiguredRenditionQuality;
 use KandySoft\MediaKit\Support\ImageFactory;
 use KandySoft\MediaKit\Support\MediaResourceFactory;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
@@ -42,6 +44,8 @@ class MediaKitServiceProvider extends ServiceProvider
         // Keys come from configuration unless the host binds its own source —
         // a KMS, a vault. `bindIf`, so a binding made earlier wins.
         $this->app->bindIf(KeyProvider::class, ConfigKeyring::class, shared: true);
+        // Rendition quality likewise — a host may let someone choose it.
+        $this->app->bindIf(RenditionQuality::class, ConfiguredRenditionQuality::class, shared: true);
         $this->app->singleton(FileCipher::class);
 
         $this->app->singleton(MediaStorageManager::class);

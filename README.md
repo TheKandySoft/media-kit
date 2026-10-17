@@ -182,7 +182,7 @@ URLs, not in the payloads clients receive.
 | `disk`, `directory` | where files land |
 | `image.driver` | `gd` or `imagick` |
 | `image.variants` | named multipliers of the requested size |
-| `image.quality` | encoder quality per format (`webp`, `jpg`, `avif`) |
+| `image.quality` | encoder quality per format (`webp`, `jpg`, `avif`); bind `Contracts\RenditionQuality` to choose it elsewhere — see [rendition quality](#rendition-quality) |
 | `image.upscale` | `false` (default) stops a rendition at its original's size instead of enlarging it |
 | `image.crop_position`, `image.strip_metadata`, `image.progressive`, `image.sharpen` | how a rendition is cropped and encoded — see [rendition quality](#rendition-quality) |
 | `image.resample`, `image.srgb` | Lanczos scaling and conversion to sRGB (Imagick) |
@@ -204,6 +204,10 @@ next request for a size makes a new file at a new path, and the old file is simp
 asked for. Renditions are matched by that path, so a file of the right size made at yesterday's
 quality is never served again.
 
+- **Quality from elsewhere.** `image.quality` is only the default answer of
+  `Contracts\RenditionQuality`. A host that lets someone choose it — a setting in an admin panel —
+  binds its own implementation; it is asked at the moment of encoding, so a long-running worker
+  never holds a stale value.
 - **No enlarging by default.** A 1200-pixel original asked for at 2400 gives a 1200-pixel
   rendition with the same proportions, not a blurred 2400. Two variants may then share a width;
   the `srcset` lists it once. Set `image.upscale` to `true` for exact sizes.

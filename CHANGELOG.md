@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.0
+
+- **`Contracts\RenditionQuality`** — where the quality of a rendition comes from. The default,
+  `ConfiguredRenditionQuality`, reads `image.quality` as before; a host that lets someone choose it
+  binds its own (`bindIf`, so a binding made earlier wins). It is asked at the moment of encoding:
+  a value copied into configuration at boot would stay stale in a long-running worker. Quality is
+  part of a rendition's path, so a new answer makes new files.
+- `ImageOperations` takes the contract as a second constructor argument.
+
 ## 1.8.0
 
 ### Chosen area

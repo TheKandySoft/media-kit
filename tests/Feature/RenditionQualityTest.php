@@ -5,11 +5,13 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use KandySoft\MediaKit\Contracts\MediaReader;
 use KandySoft\MediaKit\Contracts\MediaWriter;
+use KandySoft\MediaKit\Contracts\RenditionQuality;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Providers\MediaKitServiceProvider;
 use KandySoft\MediaKit\Services\ImageVariantGenerator;
+use KandySoft\MediaKit\Support\ImageOperations;
 
 /**
  * Як робиться рендиція: якість, обрізання, метадані — і що зміна цих
@@ -210,4 +212,40 @@ it('answers with the other worker\'s record when both made the same rendition at
     expect($repository->looked)->toBeTrue()
         ->and($variant->uuid)->toBe($winner->uuid)
         ->and($winner->fresh()->mime_type)->toBeNull();
+});
+
+it('asks the host for the quality at the moment of encoding', function () {
+    // A setting in an admin panel changes while a worker lives: the answer is
+    // asked for every time, not copied once.
+    $chosen = new class implements RenditionQuality {
+        public int $value = 70;
+
+        public function for(string $format): ?int
+        {
+            return $format === 'webp' ? $this->value : null;
+        }
+    };
+
+    app()->instance(RenditionQuality::class, $chosen);
+
+    foreach ([ImageOperations::class, ImageVariantGenerator::class] as $service) {
+        app()->forgetInstance($service);
+    }
+
+    $operations = app(ImageOperations::class);
+    $generator = app(ImageVariantGenerator::class);
+    $before = $generator->pathFor('media/a.jpg', 100, 100, 'webp');
+
+    $chosen->value = 40;
+
+    expect($operations->encoderOptions('webp')['quality'])->toBe(40)
+        ->and($operations->encoderOptions('png'))->not->toHaveKey('quality')
+        // A new quality is a new file, never the old one overwritten.
+        ->and($generator->pathFor('media/a.jpg', 100, 100, 'webp'))->not->toBe($before);
+});
+
+it('reads the quality from configuration by default', function () {
+    config(['media-kit.image.quality.webp' => 63]);
+
+    expect(app(ImageOperations::class)->encoderOptions('webp')['quality'])->toBe(63);
 });
