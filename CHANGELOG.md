@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.11.0
+
+### Video
+
+A video was stored and served as it came: a phone's HEVC `.mov` — Safari only, tens of
+megabytes, no size, no poster. A page put it in an `<img>` or a `<video>` that downloaded all of
+it before showing anything.
+
+- **Web copy** (`Services\VideoProcessor`, `Jobs\ProcessVideo`): H.264 MP4 with the index at the
+  front, scaled to `video.max_dimension`, capped at `video.max_fps`, BT.709 with HDR tone-mapped,
+  metadata stripped, sound optional. Made in the background after the record is committed; the
+  original stays as it came and is served until the copy exists. A rendition of the video
+  (`parent_uuid`), its path carrying the settings like an image rendition's.
+- **Poster:** a frame as a JPEG, recorded as an image rendition of the video, with renditions,
+  `srcset` and placeholder of its own. The video's placeholder is the poster's.
+- **Size and length** read by `ffprobe` while storing, upright for a video recorded on its side.
+  New `media_files.duration` and `fit` columns (migration `add_media_video`).
+- **`MediaResource`** of a video: `url`, `mime_type`, `extension`, `size`, `width`, `height` of
+  the copy once it exists; `duration`; `poster` (a `MediaResource`).
+- **Chosen area for a video:** `crop()` on a video keeps the area on it and cuts its poster from
+  it; the video's `focus` is the `object-position` that shows that area when the video fills a
+  frame of the requested size.
+- **`Enums\MediaFit`** (`media_files.fit`): `Cover` (default, stored as nothing) fills the frame,
+  `Contain` shows the video whole with bars. `MediaWriter::fit()`, and `fit` on
+  `MediaUpload::file()` / `keep()` / `fromArray()` — null leaves it; `copy()` carries it.
+- **`Events\VideoProcessed`** — for an application that caches media descriptions.
+- **`media:videos`** makes the missing copies and posters (`--force`, `--queue`, `--uuid`).
+- `warmVariants()` of a video warms its poster's renditions; `VariantPruner` and `media:prune`
+  judge a video's copy and poster by video settings, and `retired()` a video's sizes by its
+  poster's.
+- Configuration: `video.enabled`, `ffmpeg`, `ffprobe`, `connection`, `queue`, `timeout`,
+  `max_dimension`, `crf`, `preset`, `max_fps`, `audio`, `audio_bitrate`, `threads`, `lookahead`,
+  `poster_at`, `poster_quality`, `version`. Without `ffmpeg` nothing changes.
+
 ## 1.10.0
 
 - **`Services\VariantPruner`** — cleaning up from the application instead of a scheduled

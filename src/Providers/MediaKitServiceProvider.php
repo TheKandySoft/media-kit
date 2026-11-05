@@ -9,6 +9,7 @@ use KandySoft\MediaKit\Console\Commands\BackfillPlaceholders;
 use KandySoft\MediaKit\Console\Commands\DecryptMediaFiles;
 use KandySoft\MediaKit\Console\Commands\EncryptMediaFiles;
 use KandySoft\MediaKit\Console\Commands\GenerateMediaKey;
+use KandySoft\MediaKit\Console\Commands\ProcessMediaVideos;
 use KandySoft\MediaKit\Console\Commands\PruneMediaVariants;
 use KandySoft\MediaKit\Console\Commands\RegenerateMediaVariants;
 use KandySoft\MediaKit\Console\Commands\RekeyMediaFiles;
@@ -25,12 +26,16 @@ use KandySoft\MediaKit\Services\ImageVariantGenerator;
 use KandySoft\MediaKit\Services\MediaReadService;
 use KandySoft\MediaKit\Services\MediaWriteService;
 use KandySoft\MediaKit\Services\VariantPruner;
+use KandySoft\MediaKit\Services\VideoProcessor;
 use KandySoft\MediaKit\Storage\MediaStorageManager;
 use KandySoft\MediaKit\Support\ConfiguredRenditionQuality;
 use KandySoft\MediaKit\Support\ImageFactory;
 use KandySoft\MediaKit\Support\MediaResourceFactory;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\SignedLinks;
+use KandySoft\MediaKit\Support\VideoEncoder;
+use KandySoft\MediaKit\Support\VideoProbe;
+use KandySoft\MediaKit\Support\VideoRenditions;
 
 class MediaKitServiceProvider extends ServiceProvider
 {
@@ -64,6 +69,11 @@ class MediaKitServiceProvider extends ServiceProvider
 
         $this->app->singleton(VariantPruner::class);
 
+        $this->app->singleton(VideoProbe::class);
+        $this->app->singleton(VideoEncoder::class);
+        $this->app->singleton(VideoRenditions::class);
+        $this->app->singleton(VideoProcessor::class);
+
         $this->app->singleton(MediaReadService::class);
         $this->app->alias(MediaReadService::class, MediaReader::class);
     }
@@ -87,6 +97,7 @@ class MediaKitServiceProvider extends ServiceProvider
                 DecryptMediaFiles::class,
                 RekeyMediaFiles::class,
                 RegenerateMediaVariants::class,
+                ProcessMediaVideos::class,
             ]);
         }
     }
@@ -140,6 +151,10 @@ class MediaKitServiceProvider extends ServiceProvider
         $image['original'] = array_replace((array) ($defaults['original'] ?? []), (array) ($host['original'] ?? []));
 
         $config->set('media-kit.image', $image);
+
+        // The video block likewise: a host that sets one key keeps the rest.
+        $videoDefaults = (array) ((require $this->packagePath('config/media-kit.php'))['video'] ?? []);
+        $config->set('media-kit.video', array_replace($videoDefaults, (array) $config->get('media-kit.video', [])));
     }
 
     private function packagePath(string $path): string

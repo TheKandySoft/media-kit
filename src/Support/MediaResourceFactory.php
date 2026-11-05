@@ -12,6 +12,7 @@ use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaPolicy;
 use KandySoft\MediaKit\Data\MediaResource;
 use KandySoft\MediaKit\Data\VariantSize;
+use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Models\MediaFileTranslation;
 use KandySoft\MediaKit\Services\ImageVariantGenerator;
@@ -46,6 +47,7 @@ final class MediaResourceFactory
         private readonly Config $config,
         private readonly SignedLinks $links,
         private readonly ImageVariantGenerator $variants,
+        private readonly VideoRenditions $videos,
     ) {}
 
     public function make(
@@ -56,6 +58,10 @@ final class MediaResourceFactory
     ): MediaResource {
         $captions = $this->captions($media);
         $policy = $this->policy($media, $lifetime);
+
+        if ($media->type === MediaType::Video && ! $media->is_variant) {
+            return $this->video($media, $captions, $filter, $size, $lifetime, $policy);
+        }
 
         return new MediaResource(
             uuid: $media->uuid,
@@ -74,6 +80,93 @@ final class MediaResourceFactory
             placeholder: $media->placeholder,
             crop: $media->type->isImage() ? $media->crop : null,
         );
+    }
+
+    /**
+     * A video as the page needs it: the address of its web copy once one is
+     * made — the original until then — and its poster as a picture.
+     *
+     * The captions are the video's; the poster carries them too, so a page
+     * that shows only the poster still has its alt text.
+     *
+     * @param  array<string, MediaCaption>  $captions
+     */
+    private function video(
+        MediaFile $media,
+        array $captions,
+        MediaFilter $filter,
+        ImageSize $size,
+        ?LinkLifetime $lifetime,
+        MediaPolicy $policy,
+    ): MediaResource {
+        $copy = $this->videos->copyOf($media);
+        $poster = $this->videos->posterOf($media);
+        $served = $copy ?? $media;
+        $caption = $this->selectCaption($captions, $filter->captionLocale);
+        $posterResource = null;
+
+        if ($poster !== null) {
+            $poster->setRelation('captions', $media->captions);
+            $posterResource = $this->make($poster, $filter, $size, $lifetime);
+        }
+
+        return new MediaResource(
+            uuid: $media->uuid,
+            type: $media->type,
+            url: $this->url($served, $policy),
+            originalName: $media->original_name,
+            mimeType: $served->mime_type,
+            extension: $served->extension,
+            size: $served->size,
+            width: $served->width ?? $media->width,
+            height: $served->height ?? $media->height,
+            position: $media->position,
+            caption: $caption,
+            captions: $captions,
+            placeholder: $poster?->placeholder ?? $media->placeholder,
+            crop: $media->crop,
+            duration: $media->duration,
+            poster: $posterResource,
+            fit: $media->fit,
+            focusPoint: $this->videoFocus($media, $size),
+        );
+    }
+
+    /**
+     * Where a video filling a frame of the requested proportions has to be
+     * moved to keep the chosen area in it — as `object-position`, in fractions.
+     *
+     * The frame is the one a picture of the same proportions would be cut to
+     * (`MediaCrop::frame`), and the poster is cut to it too: what a page shows
+     * before the video plays and while it plays is the same picture.
+     *
+     * @return array{x: float, y: float}|null
+     */
+    private function videoFocus(MediaFile $video, ImageSize $size): ?array
+    {
+        $crop = $video->crop;
+        $width = (int) $video->width;
+        $height = (int) $video->height;
+
+        if ($crop === null || $width <= 0 || $height <= 0) {
+            return null;
+        }
+
+        $target = $this->variants->sizesFor($width, $height, $size, $crop)[0] ?? null;
+
+        if ($target === null || $target->height <= 0) {
+            return null;
+        }
+
+        $frame = $crop->frame($width, $height, $target->width / $target->height);
+        $position = static fn(int $offset, int $span, int $whole): float => $whole > $span
+            ? round($offset / ($whole - $span), 4)
+            : 0.5;
+
+        return [
+            'x' => $position($frame['x'], $frame['width'], $width),
+            'y' => $position($frame['y'], $frame['height'], $height),
+        ];
     }
 
     /**

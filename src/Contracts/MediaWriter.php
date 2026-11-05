@@ -9,6 +9,7 @@ use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
+use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Models\MediaFile;
 
 /**
@@ -58,6 +59,9 @@ interface MediaWriter
      * Choose the part of a picture its renditions show, leaving the original
      * whole. The whole picture, or null, takes the choice away.
      *
+     * For a video it is the part a page keeps in a frame it fills (`focus` of
+     * the video), and its poster is cut from the same part.
+     *
      * Renditions are cut again on the next request: the area is part of their
      * address. Those cut before stay on the disk for pages that still point at
      * them, until `media:prune` finds nothing asks for them any more.
@@ -65,6 +69,13 @@ interface MediaWriter
      * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
      */
     public function crop(string $uuid, ?MediaCrop $crop): MediaFile;
+
+    /**
+     * How a video is placed in a frame of other proportions — see `MediaFit`.
+     *
+     * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
+     */
+    public function fit(string $uuid, MediaFit $fit): MediaFile;
 
     /**
      * Register a file that is already sitting on a disk.

@@ -6,7 +6,9 @@ use Illuminate\Database\Eloquent\Builder;
 use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\VariantSize;
+use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Models\MediaFile;
+use KandySoft\MediaKit\Support\VideoRenditions;
 
 /**
  * Deletes renditions nothing will ask for again — for an application that
@@ -31,6 +33,7 @@ final class VariantPruner
     public function __construct(
         private readonly MediaWriter $writer,
         private readonly ImageVariantGenerator $generator,
+        private readonly VideoRenditions $videos,
     ) {}
 
     /**
@@ -71,6 +74,11 @@ final class VariantPruner
             return true;
         }
 
+        // A video's web copy and poster are judged by video settings.
+        if ($parent->type === MediaType::Video) {
+            return ! $this->videos->isCurrent($variant, $parent);
+        }
+
         return $variant->path !== $this->generator->pathFor(
             (string) $parent->path,
             (int) $variant->width,
@@ -101,6 +109,15 @@ final class VariantPruner
         $removed = 0;
 
         foreach ($originals->lazyById(200, 'uuid') as $original) {
+            // A video's renditions in sizes are its poster's.
+            if ($original->type === MediaType::Video) {
+                $original = $this->videos->posterOf($original);
+
+                if ($original === null) {
+                    continue;
+                }
+            }
+
             if (! $original->type->isImage() || $original->variants->isEmpty()) {
                 continue;
             }

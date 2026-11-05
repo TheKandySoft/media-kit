@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Str;
 use KandySoft\MediaKit\Casts\AsMediaCrop;
 use KandySoft\MediaKit\Data\MediaCrop;
+use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Enums\MediaType;
 
 /**
@@ -29,8 +30,10 @@ use KandySoft\MediaKit\Enums\MediaType;
  * @property string|null $extension
  * @property int|null $width
  * @property int|null $height
+ * @property float|null $duration  seconds; videos only
  * @property string|null $placeholder
  * @property MediaCrop|null $crop  the part chosen to be seen; null for the whole picture
+ * @property MediaFit|null $fit  how a video is placed in a frame; null is cover
  * @property int|null $size
  * @property int $position
  * @property bool $is_public
@@ -61,8 +64,10 @@ class MediaFile extends Model
         'extension',
         'width',
         'height',
+        'duration',
         'placeholder',
         'crop',
+        'fit',
         'size',
         'encryption',
         'key_id',
@@ -88,9 +93,11 @@ class MediaFile extends Model
         'is_variant' => 'boolean',
         'width' => 'integer',
         'height' => 'integer',
+        'duration' => 'float',
         'size' => 'integer',
         'position' => 'integer',
         'crop' => AsMediaCrop::class,
+        'fit' => MediaFit::class,
     ];
 
     protected static function booted(): void

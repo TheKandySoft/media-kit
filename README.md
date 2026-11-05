@@ -195,6 +195,54 @@ URLs, not in the payloads clients receive.
 | `routes.url` | the root links start at, when a proxy rewrites the address — see [storage](docs/storage.md#behind-a-proxy) |
 | `types` | extensions accepted on top of the built-in ones, per type |
 | `encryption.enabled`, `encryption.keys`, `encryption.current`, `disks.<name>.encrypt` | encryption at rest — see [storage](docs/storage.md#encryption-at-rest) |
+| `video.*` | web copies and posters of videos — see [video](#video) |
+
+## Video
+
+A phone's video — HEVC in a `.mov`, 10-bit, 60 fps, 4K, tens of megabytes — plays in Safari and
+nowhere else. Uploaded, it is stored as it came, and the package makes from it what a page can
+show:
+
+- **A web copy:** H.264 in MP4 with the index at the front, scaled to `video.max_dimension` on the
+  longer side, at most `video.max_fps`, BT.709 (HDR tone-mapped), without metadata — GPS
+  included — and without sound if `video.audio` is off. A 5-second 1080 × 1920 HEVC clip of
+  11 MB comes out at about 1 MB.
+- **A poster:** a frame of it as a JPEG — an image with renditions, a `srcset` and a placeholder
+  like any other, so a page has a picture before the video plays, and instead of it.
+- **Its size and length**, read by `ffprobe` while it is stored — upright, for a phone video
+  recorded on its side.
+
+The copy is made in the background by `Jobs\ProcessVideo`, dispatched after the record is
+committed (`video.connection`, `video.queue`). Until it exists the original is served; when it is
+done, `Events\VideoProcessed` tells the application, which rebuilds whatever cached the video's
+description. Without `ffmpeg` on the worker nothing is made and nothing fails.
+
+What a reader gets for a video:
+
+```php
+$video->url;             // the web copy, or the original until it is made
+$video->mimeType;        // video/mp4
+$video->width, $video->height, $video->duration;
+$video->poster;          // MediaResource of the frame: url, variants, srcset, placeholder
+$video->placeholder;     // the poster's
+$video->focus();         // object-position keeping the chosen area in a frame of the requested size
+$video->fit;             // MediaFit::Contain when it is to be shown whole; null is cover
+```
+
+**Placing it in a frame.** A gallery shows every file in one frame — a product photo's.
+By default a video fills it and the rest is cut, as a picture's rendition is cut
+(`MediaFit::Cover`). `MediaWriter::crop()` chooses the part to keep, as for a picture: the poster
+is cut from it, and `focus()` is the `object-position` that shows the same part of the video in a
+frame of the size the reader asked for. `MediaWriter::fit($uuid, MediaFit::Contain)` — or `fit` on
+a `MediaUpload` — asks for the whole video with bars instead. The copy itself is never cut.
+
+Every `video.*` key that shapes the copy is part of its path, like an image rendition's: change
+one and run `media:videos` to make new copies; the old ones are deleted as the new ones arrive.
+`video.threads` and `video.lookahead` keep an encode small on a worker with a fraction of a core
+— with `1` and `20`, a phone clip encodes in under 200 MB.
+
+The worker needs a timeout above `video.timeout` and a connection whose `retry_after` is above
+that, or a slow encode starts a second time while the first runs.
 
 ## Rendition quality
 
@@ -234,6 +282,7 @@ php artisan media:prune --model='App\Models\Product' --width=1200 --height=840
                                   # …and those of one owner no longer at this size
 php artisan media:placeholders    # fill in placeholders for images stored earlier
 php artisan media:regenerate      # make renditions again under the current settings (--prune)
+php artisan media:videos          # make the missing web copies and posters of videos (--queue, --force)
 php artisan media:key             # print a new encryption key
 php artisan media:encrypt         # encrypt files stored before encryption was on
 php artisan media:decrypt         # …and back

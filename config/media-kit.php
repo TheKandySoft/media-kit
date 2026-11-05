@@ -253,6 +253,88 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Video
+    |--------------------------------------------------------------------------
+    |
+    | An uploaded video is stored as it came, and a web copy is made from it in
+    | the background: H.264 MP4 that every browser plays, scaled down to
+    | 'max_dimension' on its longer side, without metadata (a phone writes the
+    | GPS position into it), with the index at the front so playback starts
+    | before the whole file is in. A frame of it becomes the poster — an image
+    | like any other, with renditions, a srcset and a placeholder.
+    |
+    | Until the copy exists the original is what is served. Without ffmpeg on
+    | the machine that runs the job nothing is made and nothing fails: the
+    | original keeps being served, as before.
+    |
+    | 'connection' and 'queue' say where the job goes. Encoding takes as long
+    | as the video, or longer: give it a worker whose timeout is above
+    | 'timeout', and a connection whose `retry_after` is above that, or a slow
+    | encode is started a second time while the first is still running.
+    | Null means the application's default.
+    |
+    | 'audio' false drops the sound — right for a gallery, where video plays
+    | muted anyway and the sound only costs bytes.
+    |
+    | 'crf' is x264's constant quality (18 visually lossless … 28 small), and
+    | 'preset' trades encoding time for size (veryfast … slow). 'max_fps'
+    | caps the frame rate: a 60 fps phone clip is twice the bytes of the same
+    | clip at 30 for no visible gain in a product gallery.
+    |
+    | 'threads' 0 lets ffmpeg decide. On a worker with a fraction of a core, 1
+    | is both faster — the threads only fight over that fraction — and a
+    | fraction of the memory: a phone's 1080p HEVC clip encodes in under
+    | 200 MB with one thread, and needs twice that with ffmpeg's own choice.
+    |
+    | 'lookahead' is how many frames x264 holds to plan its bitrate (0 = its
+    | default of 40). Each one is a frame in memory; 20 costs about 1% in size.
+    |
+    | 'version' changes nothing by itself: raise it to make every web copy
+    | again after something outside these keys changed — the ffmpeg build.
+    | Every key here goes into the copy's path, so changing one makes new
+    | copies (`media:videos`) instead of keeping the old ones.
+    */
+
+    'video' => [
+        'enabled' => (bool) env('MEDIA_KIT_VIDEO', true),
+
+        'ffmpeg' => env('MEDIA_KIT_FFMPEG', 'ffmpeg'),
+
+        'ffprobe' => env('MEDIA_KIT_FFPROBE', 'ffprobe'),
+
+        'connection' => env('MEDIA_KIT_VIDEO_CONNECTION'),
+
+        'queue' => env('MEDIA_KIT_VIDEO_QUEUE'),
+
+        'timeout' => (int) env('MEDIA_KIT_VIDEO_TIMEOUT', 1800),
+
+        'max_dimension' => (int) env('MEDIA_KIT_VIDEO_MAX_DIMENSION', 1280),
+
+        'crf' => (int) env('MEDIA_KIT_VIDEO_CRF', 26),
+
+        'preset' => env('MEDIA_KIT_VIDEO_PRESET', 'medium'),
+
+        'max_fps' => (int) env('MEDIA_KIT_VIDEO_MAX_FPS', 30),
+
+        'audio' => (bool) env('MEDIA_KIT_VIDEO_AUDIO', true),
+
+        'audio_bitrate' => env('MEDIA_KIT_VIDEO_AUDIO_BITRATE', '128k'),
+
+        'threads' => (int) env('MEDIA_KIT_VIDEO_THREADS', 0),
+
+        'lookahead' => (int) env('MEDIA_KIT_VIDEO_LOOKAHEAD', 0),
+
+        // Seconds into the video the poster is taken from — past a fade-in,
+        // and never further than the middle of a short clip.
+        'poster_at' => (float) env('MEDIA_KIT_VIDEO_POSTER_AT', 1.0),
+
+        'poster_quality' => (int) env('MEDIA_KIT_VIDEO_POSTER_QUALITY', 90),
+
+        'version' => (int) env('MEDIA_KIT_VIDEO_VERSION', 1),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Extra extensions
     |--------------------------------------------------------------------------
     |

@@ -4,6 +4,7 @@ namespace KandySoft\MediaKit\Data;
 
 use Illuminate\Contracts\Support\Arrayable;
 use JsonSerializable;
+use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Enums\MediaType;
 
 /**
@@ -39,6 +40,22 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
         public ?string $placeholder = null,
         /** The part a person chose to be seen, in fractions of the original. */
         public ?MediaCrop $crop = null,
+        /** Seconds a video plays. */
+        public ?float $duration = null,
+        /**
+         * A video's frame as a picture, with renditions and placeholder of its
+         * own — what is shown before the video plays, or instead of it.
+         */
+        public ?MediaResource $poster = null,
+        /** How a video is placed in a frame of other proportions. */
+        public ?MediaFit $fit = null,
+        /**
+         * The point `focus()` answers, when the factory worked it out itself —
+         * for a video, which has no renditions to measure it by.
+         *
+         * @var array{x: float, y: float}|null
+         */
+        public ?array $focusPoint = null,
     ) {}
 
     public function aspect(): ?float
@@ -66,6 +83,10 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
      */
     public function focus(): ?array
     {
+        if ($this->focusPoint !== null) {
+            return $this->focusPoint;
+        }
+
         if ($this->crop === null || ! $this->width || ! $this->height) {
             return null;
         }
@@ -171,6 +192,18 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
 
         if (($focus = $this->focus()) !== null) {
             $payload['focus'] = $focus;
+        }
+
+        if ($this->duration !== null) {
+            $payload['duration'] = $this->duration;
+        }
+
+        if ($this->poster !== null) {
+            $payload['poster'] = $this->poster->toArray();
+        }
+
+        if ($this->fit !== null) {
+            $payload['fit'] = $this->fit->value;
         }
 
         return $payload;

@@ -7,6 +7,7 @@ use KandySoft\MediaKit\Contracts\MediaStorage;
 use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\VariantSize;
+use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Services\ImageVariantGenerator;
 use KandySoft\MediaKit\Services\VariantPruner;
@@ -119,7 +120,9 @@ class PruneMediaVariants extends Command
             return 'made with other rendition settings';
         }
 
-        if ($requested === null) {
+        // A video's web copy and poster are not cut to a size; the poster's
+        // own renditions are, and are judged below like any picture's.
+        if ($requested === null || $parent->type === MediaType::Video) {
             return null;
         }
 

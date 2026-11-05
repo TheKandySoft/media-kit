@@ -144,6 +144,11 @@ $image->variant('medium')?->url;
 $image->aspect();
 $image->crop;                    // the chosen area, or null
 $image->focus();                 // ['x' => 0.5, 'y' => 0.3] inside the renditions, or null
+
+// A video:
+$video->url;                     // its web copy (MP4), or the original until it is made
+$video->duration;                // seconds
+$video->poster?->srcset();       // its poster, a picture like any other
 ```
 
 Disk names, storage paths and owner ids are not part of it, by design.

@@ -114,7 +114,8 @@ class MediaFileRepository
         // renditions already exist. A listing shows dozens of them, and left to
         // lazy loading that is one query per picture.
         $query->with([
-            'variants',
+            // A video's poster is one of its variants, with renditions of its own.
+            'variants.variants',
             'captions' => function ($relation) use ($filter): void {
                 if ($filter->captionLocale !== null) {
                     $relation->where('locale', $filter->captionLocale);

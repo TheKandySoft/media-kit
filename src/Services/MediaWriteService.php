@@ -18,9 +18,11 @@ use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
 use KandySoft\MediaKit\Data\MediaUpload;
+use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Exceptions\MediaNotFound;
 use KandySoft\MediaKit\Exceptions\UnsupportedFileType;
+use KandySoft\MediaKit\Jobs\ProcessVideo;
 use KandySoft\MediaKit\Models\MediaFile;
 use KandySoft\MediaKit\Models\MediaFileTranslation;
 use KandySoft\MediaKit\Repositories\MediaFileRepository;
@@ -31,6 +33,8 @@ use KandySoft\MediaKit\Support\ImageIntake;
 use KandySoft\MediaKit\Support\ImageOperations;
 use KandySoft\MediaKit\Support\MediaTypeResolver;
 use KandySoft\MediaKit\Support\PlaceholderFactory;
+use KandySoft\MediaKit\Support\VideoProbe;
+use KandySoft\MediaKit\Support\VideoRenditions;
 use Throwable;
 
 final class MediaWriteService implements MediaWriter
@@ -46,6 +50,8 @@ final class MediaWriteService implements MediaWriter
         private readonly Cache $cache,
         private readonly ImageIntake $intake,
         private readonly ImageOperations $operations,
+        private readonly VideoProbe $videoProbe,
+        private readonly VideoRenditions $videoRenditions,
     ) {}
 
     /**
@@ -84,6 +90,10 @@ final class MediaWriteService implements MediaWriter
 
             if ($upload->crop !== null) {
                 $this->cropFile($file, $upload->crop);
+            }
+
+            if ($upload->fit !== null) {
+                $this->fitFile($file, $upload->fit);
             }
 
             $kept[] = $file->uuid;
@@ -129,6 +139,7 @@ final class MediaWriteService implements MediaWriter
 
         // Measured before the reworked copy is released with the temporary file.
         $size = $intake->file->getSize() ?: null;
+        [$width, $height, $duration] = $this->dimensionsOf($type, $intake->file, $intake->width, $intake->height);
 
         try {
             [$path, $envelope] = $mediaDisk->store(
@@ -149,8 +160,9 @@ final class MediaWriteService implements MediaWriter
             'type' => $type,
             'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
-            'width' => $intake->width,
-            'height' => $intake->height,
+            'width' => $width,
+            'height' => $height,
+            ...$this->durationColumn($duration),
             'placeholder' => $intake->placeholder,
             'size' => $envelope?->size ?? $size,
             ...Envelope::changes($envelope),
@@ -166,6 +178,12 @@ final class MediaWriteService implements MediaWriter
         if ($upload->crop !== null) {
             $this->cropFile($record, $upload->crop);
         }
+
+        if ($upload->fit !== null) {
+            $this->fitFile($record, $upload->fit);
+        }
+
+        $this->scheduleVideo($record);
 
         return $record;
     }
@@ -195,6 +213,7 @@ final class MediaWriteService implements MediaWriter
         // Write the replacement before touching the old one: a failure here
         // leaves the original in place rather than a record pointing at nothing.
         $size = $intake->file->getSize() ?: null;
+        [$width, $height, $duration] = $this->dimensionsOf($type, $intake->file, $intake->width, $intake->height);
 
         try {
             [$path, $envelope] = $disk->store(
@@ -218,8 +237,9 @@ final class MediaWriteService implements MediaWriter
             'type' => $type,
             'mime_type' => $this->mimeTypeOf($file),
             'extension' => $extension,
-            'width' => $intake->width,
-            'height' => $intake->height,
+            'width' => $width,
+            'height' => $height,
+            ...$this->durationColumn($duration, $existing->duration),
             'placeholder' => $intake->placeholder,
             'crop' => null,
             'size' => $envelope?->size ?? $size,
@@ -235,7 +255,10 @@ final class MediaWriteService implements MediaWriter
             $this->writeCaptions($existing, $captions);
         }
 
-        return $existing->refresh();
+        $existing->refresh();
+        $this->scheduleVideo($existing);
+
+        return $existing;
     }
 
     /**
@@ -270,6 +293,15 @@ final class MediaWriteService implements MediaWriter
         return $file;
     }
 
+    public function fit(string $uuid, MediaFit $fit): MediaFile
+    {
+        $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
+
+        $this->fitFile($file, $fit);
+
+        return $file;
+    }
+
     public function adopt(string $path, ?string $disk = null, ?string $tag = null): MediaFile
     {
         $mediaDisk = $this->storage->disk($disk);
@@ -289,7 +321,7 @@ final class MediaWriteService implements MediaWriter
 
         [$width, $height, $placeholder] = $this->readFromDisk($type, $mediaDisk, $path);
 
-        return $this->media->store([
+        $adopted = $this->media->store([
             'disk' => $mediaDisk->name(),
             'path' => $path,
             'original_name' => basename($path),
@@ -305,6 +337,10 @@ final class MediaWriteService implements MediaWriter
             'is_variant' => false,
             'tag' => $tag,
         ]);
+
+        $this->scheduleVideo($adopted);
+
+        return $adopted;
     }
 
     /**
@@ -331,6 +367,7 @@ final class MediaWriteService implements MediaWriter
                         locale: $original->locale,
                         captions: $this->captionsOf($original),
                         crop: $original->crop,
+                        fit: $original->fit,
                     ),
                     $to,
                     $original->disk,
@@ -421,6 +458,13 @@ final class MediaWriteService implements MediaWriter
      */
     public function warmVariants(MediaFile $media, ImageSize $size = new ImageSize()): array
     {
+        // A video is shown through its poster: that is the picture to warm.
+        if ($media->type === MediaType::Video && ! $media->is_variant) {
+            $poster = $this->videoRenditions->posterOf($media->loadMissing('variants'));
+
+            return $poster === null ? [] : $this->warmVariants($poster, $size);
+        }
+
         if (! $media->type->isImage()) {
             return [];
         }
@@ -531,10 +575,52 @@ final class MediaWriteService implements MediaWriter
             return;
         }
 
+        if ($file->type === MediaType::Video && ! $file->is_variant) {
+            $this->cropVideo($file, $crop);
+
+            return;
+        }
+
         $file->update([
             'crop' => $crop,
             'placeholder' => $this->placeholderOf($file, $crop) ?? $file->placeholder,
         ]);
+    }
+
+    /**
+     * A video's area is kept on the video — a page positions the video by it —
+     * and given to its poster, which is cut from it like any picture. The
+     * video's placeholder is the poster's, so it follows.
+     */
+    private function cropVideo(MediaFile $video, ?MediaCrop $crop): void
+    {
+        $placeholder = $video->placeholder;
+
+        foreach ($video->variants()->get() as $variant) {
+            if ($variant->type === MediaType::Image) {
+                $this->cropFile($variant, $crop ?? MediaCrop::whole());
+                $placeholder = $variant->refresh()->placeholder ?? $placeholder;
+            }
+        }
+
+        $video->update(['crop' => $crop, 'placeholder' => $placeholder]);
+        $video->unsetRelation('variants');
+    }
+
+    /**
+     * Cover is the default and is kept as nothing: a host whose schema is a
+     * step behind the package keeps working, and every file stored before
+     * already reads as cover.
+     */
+    private function fitFile(MediaFile $file, MediaFit $fit): void
+    {
+        $value = $fit === MediaFit::Cover ? null : $fit;
+
+        if ($file->fit === $value) {
+            return;
+        }
+
+        $file->update(['fit' => $value]);
     }
 
     /**
@@ -565,6 +651,51 @@ final class MediaWriteService implements MediaWriter
         }
 
         return $this->placeholders->forImage($image);
+    }
+
+    /**
+     * Size of what was uploaded — read from the picture, or for a video from
+     * its header by `ffprobe`, so a video has its proportions from the moment
+     * it is stored rather than once it is encoded.
+     *
+     * @return array{0: int|null, 1: int|null, 2: float|null}  width, height, duration
+     */
+    private function dimensionsOf(MediaType $type, UploadedFile $file, ?int $width, ?int $height): array
+    {
+        if ($type !== MediaType::Video || ! $this->config->get('media-kit.video.enabled', true)) {
+            return [$width, $height, null];
+        }
+
+        $info = $this->videoProbe->probe((string) $file->getRealPath());
+
+        return $info === null ? [null, null, null] : [$info->width, $info->height, $info->duration];
+    }
+
+    /**
+     * The duration column, only when there is something to write to it.
+     *
+     * A picture has no duration, and a host whose schema is a step behind the
+     * package — a migration not run yet, a test that builds the table from a
+     * list — must keep storing pictures.
+     *
+     * @return array<string, float|null>
+     */
+    private function durationColumn(?float $duration, ?float $previous = null): array
+    {
+        return $duration === null && $previous === null ? [] : ['duration' => $duration];
+    }
+
+    /**
+     * Have the web copy and poster of a video made — once the record is
+     * committed, so the worker that picks the job up can find it.
+     */
+    private function scheduleVideo(MediaFile $file): void
+    {
+        if ($file->type !== MediaType::Video || $file->is_variant || ! $this->config->get('media-kit.video.enabled', true)) {
+            return;
+        }
+
+        ProcessVideo::dispatch((string) $file->uuid)->afterCommit();
     }
 
     /**

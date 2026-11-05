@@ -4,6 +4,7 @@ namespace KandySoft\MediaKit\Data;
 
 use Illuminate\Http\UploadedFile;
 use InvalidArgumentException;
+use KandySoft\MediaKit\Enums\MediaFit;
 
 /**
  * One entry of a media collection being synchronised.
@@ -13,7 +14,8 @@ use InvalidArgumentException;
  * with the entry so a single call can create the file and its translations.
  *
  * So does the chosen area. Null leaves the file's area as it is; the whole
- * picture (`MediaCrop::whole()`) takes it away.
+ * picture (`MediaCrop::whole()`) takes it away. And, for a video, its fit:
+ * null leaves it, `MediaFit::Cover` puts it back to the default.
  */
 final readonly class MediaUpload
 {
@@ -27,6 +29,7 @@ final readonly class MediaUpload
         public ?string $locale,
         public array $captions,
         public ?MediaCrop $crop = null,
+        public ?MediaFit $fit = null,
     ) {
         if ($this->file === null && $this->uuid === null) {
             throw new InvalidArgumentException('A media upload needs either a file to store or the uuid of one to keep.');
@@ -42,8 +45,9 @@ final readonly class MediaUpload
         ?string $locale = null,
         array $captions = [],
         ?MediaCrop $crop = null,
+        ?MediaFit $fit = null,
     ): self {
-        return new self($file, null, $tag, $locale, $captions, $crop);
+        return new self($file, null, $tag, $locale, $captions, $crop, $fit);
     }
 
     /**
@@ -55,15 +59,16 @@ final readonly class MediaUpload
         ?string $locale = null,
         array $captions = [],
         ?MediaCrop $crop = null,
+        ?MediaFit $fit = null,
     ): self {
-        return new self(null, $uuid, $tag, $locale, $captions, $crop);
+        return new self(null, $uuid, $tag, $locale, $captions, $crop, $fit);
     }
 
     /**
      * Build from the shape a form posts: a file input plus optional captions
      * and area.
      *
-     * @param  array{file?: UploadedFile|null, uuid?: string|null, tag?: string|null, locale?: string|null, captions?: array<string, array{alt?: string|null, title?: string|null}>, crop?: array{x: float, y: float, width: float, height: float}|null}  $item
+     * @param  array{file?: UploadedFile|null, uuid?: string|null, tag?: string|null, locale?: string|null, captions?: array<string, array{alt?: string|null, title?: string|null}>, crop?: array{x: float, y: float, width: float, height: float}|null, fit?: string|null}  $item
      */
     public static function fromArray(array $item): self
     {
@@ -75,10 +80,11 @@ final readonly class MediaUpload
 
         $file = $item['file'] ?? null;
         $crop = MediaCrop::fromArray($item['crop'] ?? null);
+        $fit = is_string($item['fit'] ?? null) ? MediaFit::tryFrom($item['fit']) : null;
 
         return $file instanceof UploadedFile
-            ? self::file($file, $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop)
-            : self::keep((string) ($item['uuid'] ?? ''), $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop);
+            ? self::file($file, $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop, $fit)
+            : self::keep((string) ($item['uuid'] ?? ''), $item['tag'] ?? null, $item['locale'] ?? null, $captions, $crop, $fit);
     }
 
     public function isNewFile(): bool
