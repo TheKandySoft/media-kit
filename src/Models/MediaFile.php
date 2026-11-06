@@ -31,11 +31,14 @@ use KandySoft\MediaKit\Enums\MediaType;
  * @property int|null $width
  * @property int|null $height
  * @property float|null $duration  seconds; videos only
+ * @property float|null $poster_at  the moment a video's poster is taken from; null is the configured one
+ * @property string|null $poster_uuid  a picture uploaded to be a video's poster
  * @property string|null $placeholder
  * @property MediaCrop|null $crop  the part chosen to be seen; null for the whole picture
  * @property MediaFit|null $fit  how a video is placed in a frame; null is cover
  * @property int|null $size
  * @property int $position
+ * @property bool $is_cover  the file a list shows for its owner
  * @property bool $is_public
  * @property bool $is_variant
  * @property string|null $tag
@@ -65,6 +68,8 @@ class MediaFile extends Model
         'width',
         'height',
         'duration',
+        'poster_at',
+        'poster_uuid',
         'placeholder',
         'crop',
         'fit',
@@ -74,6 +79,7 @@ class MediaFile extends Model
         'wrapped_key',
         'checksum',
         'position',
+        'is_cover',
         'is_public',
         'is_variant',
         'tag',
@@ -94,6 +100,8 @@ class MediaFile extends Model
         'width' => 'integer',
         'height' => 'integer',
         'duration' => 'float',
+        'poster_at' => 'float',
+        'is_cover' => 'boolean',
         'size' => 'integer',
         'position' => 'integer',
         'crop' => AsMediaCrop::class,

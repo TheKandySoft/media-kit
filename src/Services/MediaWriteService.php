@@ -17,6 +17,7 @@ use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
+use KandySoft\MediaKit\Data\MediaPoster;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Enums\MediaType;
@@ -96,6 +97,14 @@ final class MediaWriteService implements MediaWriter
                 $this->fitFile($file, $upload->fit);
             }
 
+            if ($upload->poster !== null) {
+                $this->posterFile($file, $upload->poster);
+            }
+
+            if ($upload->cover !== null) {
+                $this->coverFile($file, $upload->cover);
+            }
+
             $kept[] = $file->uuid;
         }
 
@@ -119,7 +128,16 @@ final class MediaWriteService implements MediaWriter
         if ($local !== null) {
             try {
                 return $this->store(
-                    MediaUpload::file($local->toUploadedFile($file->getClientOriginalName()), $upload->tag, $upload->locale, $upload->captions, $upload->crop),
+                    MediaUpload::file(
+                        $local->toUploadedFile($file->getClientOriginalName()),
+                        $upload->tag,
+                        $upload->locale,
+                        $upload->captions,
+                        $upload->crop,
+                        $upload->fit,
+                        $upload->poster,
+                        $upload->cover,
+                    ),
                     $model,
                     $disk,
                 );
@@ -183,6 +201,15 @@ final class MediaWriteService implements MediaWriter
             $this->fitFile($record, $upload->fit);
         }
 
+        if ($upload->cover !== null) {
+            $this->coverFile($record, $upload->cover);
+        }
+
+        // Before the video is scheduled: the frame is made with the rest.
+        if ($upload->poster !== null) {
+            $this->posterFile($record, $upload->poster, schedule: false);
+        }
+
         $this->scheduleVideo($record);
 
         return $record;
@@ -242,6 +269,11 @@ final class MediaWriteService implements MediaWriter
             ...$this->durationColumn($duration, $existing->duration),
             'placeholder' => $intake->placeholder,
             'crop' => null,
+            // Chosen for another video: its moment may not exist in this one,
+            // and the uploaded picture went with the renditions above.
+            ...($existing->poster_at !== null || $existing->poster_uuid !== null
+                ? ['poster_at' => null, 'poster_uuid' => null]
+                : []),
             'size' => $envelope?->size ?? $size,
             ...Envelope::changes($envelope, $existing),
             'is_public' => $disk->isPublic(),
@@ -300,6 +332,15 @@ final class MediaWriteService implements MediaWriter
         $this->fitFile($file, $fit);
 
         return $file;
+    }
+
+    public function poster(string $uuid, MediaPoster $poster): MediaFile
+    {
+        $file = $this->media->findByUuid($uuid) ?? throw MediaNotFound::uuid($uuid);
+
+        $this->posterFile($file, $poster);
+
+        return $file->refresh();
     }
 
     public function adopt(string $path, ?string $disk = null, ?string $tag = null): MediaFile
@@ -368,6 +409,8 @@ final class MediaWriteService implements MediaWriter
                         captions: $this->captionsOf($original),
                         crop: $original->crop,
                         fit: $original->fit,
+                        poster: $original->poster_at !== null ? MediaPoster::frame($original->poster_at) : null,
+                        cover: $original->is_cover ? true : null,
                     ),
                     $to,
                     $original->disk,
@@ -375,6 +418,8 @@ final class MediaWriteService implements MediaWriter
             } finally {
                 $temporary->delete();
             }
+
+            $this->copyOwnPoster($original, end($copies));
         }
 
         return $copies;
@@ -594,14 +639,15 @@ final class MediaWriteService implements MediaWriter
      */
     private function cropVideo(MediaFile $video, ?MediaCrop $crop): void
     {
-        $placeholder = $video->placeholder;
-
         foreach ($video->variants()->get() as $variant) {
             if ($variant->type === MediaType::Image) {
                 $this->cropFile($variant, $crop ?? MediaCrop::whole());
-                $placeholder = $variant->refresh()->placeholder ?? $placeholder;
             }
         }
+
+        // The placeholder of the poster shown — an uploaded one, if there is.
+        $video->unsetRelation('variants');
+        $placeholder = $this->videoRenditions->posterOf($video)?->placeholder ?? $video->placeholder;
 
         $video->update(['crop' => $crop, 'placeholder' => $placeholder]);
         $video->unsetRelation('variants');
@@ -621,6 +667,177 @@ final class MediaWriteService implements MediaWriter
         }
 
         $file->update(['fit' => $value]);
+    }
+
+    /**
+     * Mark the file a list shows for its owner — or take the mark away.
+     *
+     * Written only when it changes: a host whose schema is a step behind the
+     * package keeps saving galleries, where nothing is marked.
+     */
+    private function coverFile(MediaFile $file, bool $cover): void
+    {
+        if ((bool) $file->is_cover === $cover) {
+            return;
+        }
+
+        $file->update(['is_cover' => $cover]);
+    }
+
+    /**
+     * Choose what a video's poster is made from.
+     *
+     * A frame puts aside an uploaded picture and has the frame made in the
+     * background — unless it was made before, at the same moment. Until it is
+     * ready, the poster shown is the one made before it (`posterOf`).
+     */
+    private function posterFile(MediaFile $video, MediaPoster $poster, bool $schedule = true): void
+    {
+        if ($video->type !== MediaType::Video || $video->is_variant) {
+            return;
+        }
+
+        if ($poster->image !== null) {
+            $this->ownPoster($video, $poster->image);
+
+            return;
+        }
+
+        $same = $video->poster_at === null
+            ? $poster->at === null
+            : $poster->at !== null && abs($video->poster_at - $poster->at) < 0.0005;
+
+        if ($same && $video->poster_uuid === null) {
+            return;
+        }
+
+        $own = $video->poster_uuid;
+
+        $video->update([
+            'poster_at' => $poster->at,
+            ...($own !== null ? ['poster_uuid' => null] : []),
+        ]);
+
+        if ($own !== null && ($picture = $this->media->findByUuid($own)) !== null) {
+            $this->forget($picture);
+        }
+
+        $video->unsetRelation('variants');
+        $frame = $this->videoRenditions->framePosterOf($video);
+
+        if ($frame !== null) {
+            $video->update(['placeholder' => $frame->placeholder ?? $video->placeholder]);
+        } elseif ($schedule) {
+            $this->scheduleVideo($video);
+        }
+
+        $video->unsetRelation('variants');
+    }
+
+    /**
+     * Store a picture as a video's poster, in place of the one before.
+     *
+     * It is a rendition of the video: stored next to it, deleted with it, cut
+     * from the area chosen for it — the same part the video keeps in a frame
+     * it fills, if the picture has the video's proportions.
+     */
+    private function ownPoster(MediaFile $video, UploadedFile $file): void
+    {
+        $local = $this->localCopy($file);
+
+        if ($local !== null) {
+            try {
+                $this->ownPoster($video, $local->toUploadedFile($file->getClientOriginalName()));
+
+                return;
+            } finally {
+                $local->delete();
+            }
+        }
+
+        $extension = strtolower($file->getClientOriginalExtension());
+        $type = $this->types->fromExtension($extension);
+
+        if ($type === null || ! $type->isImage()) {
+            throw UnsupportedFileType::extension($extension);
+        }
+
+        $disk = $this->storage->disk($video->disk);
+        $intake = $this->intake->read($type, $file, $extension, withPlaceholder: ! $disk->encrypts());
+        $size = $intake->file->getSize() ?: null;
+
+        try {
+            [$path, $envelope] = $disk->store(
+                $intake->file,
+                dirname((string) $video->path) . '/posters',
+                Str::random(40) . '.' . $extension,
+            );
+        } finally {
+            $intake->release();
+        }
+
+        $picture = $this->media->store([
+            'model_type' => $video->model_type,
+            'model_id' => $video->model_id,
+            'disk' => $disk->name(),
+            'path' => $path,
+            'original_name' => $file->getClientOriginalName(),
+            'type' => $type,
+            'mime_type' => $this->mimeTypeOf($file),
+            'extension' => $extension,
+            'width' => $intake->width,
+            'height' => $intake->height,
+            'placeholder' => $intake->placeholder,
+            'size' => $envelope?->size ?? $size,
+            ...Envelope::changes($envelope),
+            'position' => $video->position,
+            'is_public' => $disk->isPublic(),
+            'is_variant' => true,
+            'tag' => $video->tag,
+            'locale' => $video->locale,
+            'parent_uuid' => $video->uuid,
+        ]);
+
+        if ($video->crop !== null) {
+            $this->cropFile($picture, $video->crop);
+        }
+
+        $previous = $video->poster_uuid;
+
+        $video->update([
+            'poster_uuid' => $picture->uuid,
+            'placeholder' => $picture->refresh()->placeholder ?? $video->placeholder,
+        ]);
+
+        if ($previous !== null && ($old = $this->media->findByUuid($previous)) !== null) {
+            $this->forget($old);
+        }
+
+        $video->unsetRelation('variants');
+    }
+
+    /**
+     * A copied video keeps the picture uploaded as its poster.
+     */
+    private function copyOwnPoster(MediaFile $original, MediaFile|false $copy): void
+    {
+        if ($copy === false || $original->poster_uuid === null) {
+            return;
+        }
+
+        $picture = $this->media->findByUuid($original->poster_uuid);
+
+        if ($picture === null) {
+            return;
+        }
+
+        $temporary = $this->storage->disk($picture->disk)->pull($picture->path, Envelope::of($picture));
+
+        try {
+            $this->ownPoster($copy, $temporary->toUploadedFile($picture->original_name ?? basename($picture->path)));
+        } finally {
+            $temporary->delete();
+        }
     }
 
     /**

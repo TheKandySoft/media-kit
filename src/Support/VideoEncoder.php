@@ -122,18 +122,24 @@ final class VideoEncoder
     }
 
     /**
-     * One frame as a JPEG, at the size of the copy.
+     * One frame as a JPEG, at the size of the copy — at the moment chosen for
+     * this video, or the configured one.
      *
      * @return array{0: int, 1: int}  the poster's width and height
      */
-    public function poster(string $input, string $output, VideoInfo $info): array
+    public function poster(string $input, string $output, VideoInfo $info, ?float $chosen = null): array
     {
         [$width, $height] = $info->fitWithin($this->maxDimension());
 
-        // Past a fade-in, but within a short clip: the middle at the latest.
-        $at = $info->duration === null
-            ? 0.0
-            : max(0.0, min($this->posterAt(), $info->duration / 2));
+        $at = match (true) {
+            // A frame that exists: seeking to the very end gives none.
+            $chosen !== null => $info->duration === null
+                ? max(0.0, $chosen)
+                : max(0.0, min($chosen, $info->duration - 0.1)),
+            // Past a fade-in, but within a short clip: the middle at the latest.
+            $info->duration === null => 0.0,
+            default => max(0.0, min($this->posterAt(), $info->duration / 2)),
+        };
 
         $this->runWithFilters($input, $output, $info, $width, $height, [
             '-frames:v', '1',

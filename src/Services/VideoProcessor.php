@@ -64,12 +64,15 @@ final class VideoProcessor
 
         $video->loadMissing('variants');
 
-        return $this->renditions->copyOf($video) === null || $this->renditions->posterOf($video) === null;
+        return $this->renditions->copyOf($video) === null || $this->renditions->needsPoster($video);
     }
 
     /**
-     * Make the web copy and the poster, unless both already exist — or again,
+     * Make what is missing of the web copy and the poster — or both again,
      * with `$force`.
+     *
+     * A newly chosen poster frame costs a frame, not a new copy of the whole
+     * video. A video with an uploaded poster gets no frame made at all.
      *
      * Returns false when nothing could be made here: processing is off, or
      * ffmpeg is not installed. A video ffmpeg cannot read is an error.
@@ -97,6 +100,10 @@ final class VideoProcessor
                 return true;
             }
 
+            $copy = $force ? null : $this->renditions->copyOf($video);
+            $frame = $force ? null : $this->renditions->framePosterOf($video);
+            $makeFrame = $frame === null && ($force || $this->renditions->ownPosterOf($video) === null);
+
             $disk = $this->storage->disk($video->disk);
             $source = $disk->pull((string) $video->path, Envelope::of($video));
 
@@ -104,26 +111,29 @@ final class VideoProcessor
                 $info = $this->probe->probe($source->path())
                     ?? throw new RuntimeException("Video {$video->uuid} cannot be read.");
 
-                $copy = $this->makeCopy($disk, $video, $source->path(), $info);
-                $poster = $this->makePoster($disk, $video, $source->path(), $info);
+                $copy ??= $this->makeCopy($disk, $video, $source->path(), $info);
+                $frame = $makeFrame ? $this->makePoster($disk, $video, $source->path(), $info) : $frame;
             } finally {
                 $source->delete();
             }
 
             // The poster is cut from the area chosen for the video — and the
             // video's placeholder is that of the area, not of the whole frame.
-            if ($video->crop !== null) {
-                $poster = $this->writer->crop((string) $poster->uuid, $video->crop)->refresh();
+            if ($makeFrame && $frame !== null && $video->crop !== null) {
+                $frame = $this->writer->crop((string) $frame->uuid, $video->crop)->refresh();
             }
+
+            $own = $this->renditions->ownPosterOf($video);
+            $poster = $own ?? $frame;
 
             $video->update([
                 'width' => $info->width,
                 'height' => $info->height,
                 'duration' => $info->duration,
-                'placeholder' => $poster->placeholder ?? $video->placeholder,
+                'placeholder' => $poster?->placeholder ?? $video->placeholder,
             ]);
 
-            $this->forgetStale($video, [$copy->uuid, $poster->uuid]);
+            $this->forgetStale($video, array_values(array_filter([$copy->uuid, $frame?->uuid, $own?->uuid])));
 
             VideoProcessed::dispatch($video->refresh()->load('variants'));
 
@@ -156,7 +166,7 @@ final class VideoProcessor
         $output = $this->scratch('jpg');
 
         try {
-            [$width, $height] = $this->encoder->poster($source, $output, $info);
+            [$width, $height] = $this->encoder->poster($source, $output, $info, $video->poster_at);
 
             return $this->record($disk, $video, $this->renditions->posterPathFor($video), $output, [
                 'type' => MediaType::Image,
@@ -224,8 +234,9 @@ final class VideoProcessor
     }
 
     /**
-     * Copies and posters made with earlier settings: nothing asks for them any
-     * more. Deleted through the writer, so a poster takes its renditions along.
+     * Copies and posters made with earlier settings — or at a moment no longer
+     * chosen: nothing asks for them any more. Deleted through the writer, so a
+     * poster takes its renditions along.
      *
      * @param  list<string>  $keep
      */

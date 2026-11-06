@@ -236,6 +236,24 @@ is cut from it, and `focus()` is the `object-position` that shows the same part 
 frame of the size the reader asked for. `MediaWriter::fit($uuid, MediaFit::Contain)` — or `fit` on
 a `MediaUpload` — asks for the whole video with bars instead. The copy itself is never cut.
 
+**Choosing the poster.** By default the poster is the frame at `video.poster_at`. A person picks
+another one — or a picture of their own:
+
+```php
+MediaWrite::poster($uuid, MediaPoster::frame(2.4));                 // the frame at 2.4 s
+MediaWrite::poster($uuid, MediaPoster::image($request->file('p'))); // an uploaded picture
+MediaWrite::poster($uuid, MediaPoster::frame(null));                // back to the default
+```
+
+`poster` on a `MediaUpload` does the same from a synced form (`['at' => 2.4]` or
+`['image' => $file]`). A frame is made in the background, and only the frame: the copy stays.
+Until it is ready the poster made before is shown. An uploaded picture is a rendition of the
+video — cut from the area chosen for it, deleted with it.
+
+**Cover.** `cover` on a `MediaUpload` marks the file a list shows for its owner — a product card
+showing a video while the gallery opens with a photo. `MediaResource::$cover`, and `cover: true`
+in its array.
+
 Every `video.*` key that shapes the copy is part of its path, like an image rendition's: change
 one and run `media:videos` to make new copies; the old ones are deleted as the new ones arrive.
 `video.threads` and `video.lookahead` keep an encode small on a worker with a fraction of a core

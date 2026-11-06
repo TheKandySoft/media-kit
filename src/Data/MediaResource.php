@@ -56,6 +56,12 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
          * @var array{x: float, y: float}|null
          */
         public ?array $focusPoint = null,
+        /** The file a list shows for its owner, instead of the first one. */
+        public bool $cover = false,
+        /** The second of a video its poster is taken from; null — the configured one. */
+        public ?float $posterAt = null,
+        /** Whether a video's poster is a picture uploaded for it, not a frame. */
+        public bool $posterOwn = false,
     ) {}
 
     public function aspect(): ?float
@@ -204,6 +210,10 @@ final readonly class MediaResource implements Arrayable, JsonSerializable
 
         if ($this->fit !== null) {
             $payload['fit'] = $this->fit->value;
+        }
+
+        if ($this->cover) {
+            $payload['cover'] = true;
         }
 
         return $payload;

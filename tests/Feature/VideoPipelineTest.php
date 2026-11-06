@@ -11,6 +11,7 @@ use KandySoft\MediaKit\Contracts\MediaWriter;
 use KandySoft\MediaKit\Data\Envelope;
 use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaFilter;
+use KandySoft\MediaKit\Data\MediaPoster;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaType;
 use KandySoft\MediaKit\Events\VideoProcessed;
@@ -496,4 +497,183 @@ it('takes the fit from a synced form, and leaves it when the form says nothing',
 
     app(MediaWriter::class)->sync($owner, [MediaUpload::fromArray(['uuid' => $video->uuid, 'fit' => 'cover'])]);
     expect($video->refresh()->fit)->toBeNull();
+});
+
+it('takes the poster from the second chosen for the video', function () {
+    $video = storeClip(makeClip());
+    $before = posterOf($video);
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::frame(1.5));
+
+    $after = posterOf($video);
+
+    expect($video->refresh()->poster_at)->toBe(1.5)
+        ->and($after->path)->not->toBe($before->path)
+        ->and(MediaFile::query()->find($before->uuid))->toBeNull()
+        ->and(app(MediaReader::class)->byUuid($video->uuid)->posterAt)->toBe(1.5);
+});
+
+it('makes a chosen frame without encoding the video again', function () {
+    $video = storeClip(makeClip());
+    $copy = copyOf($video);
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::frame(0.5));
+
+    expect(copyOf($video)->uuid)->toBe($copy->uuid)
+        ->and(copyOf($video)->updated_at->equalTo($copy->updated_at))->toBeTrue();
+});
+
+it('shows the poster made before while a newly chosen frame is being made', function () {
+    $video = storeClip(makeClip());
+    $before = posterOf($video);
+    Queue::fake();
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::frame(1.2));
+
+    expect(posterOf($video)->uuid)->toBe($before->uuid)
+        ->and(app(\KandySoft\MediaKit\Services\VideoProcessor::class)->needsProcessing($video->refresh()))->toBeTrue();
+    Queue::assertPushed(ProcessVideo::class);
+});
+
+it('takes the last frame there is for a second past the end', function () {
+    $video = storeClip(makeClip());
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::frame(30));
+
+    expect(posterOf($video))->not->toBeNull()
+        ->and(posterOf($video)->width)->toBe(320);
+});
+
+it('shows a picture uploaded as the poster, and the frame again once one is chosen', function () {
+    $video = storeClip(makeClip());
+    $frame = posterOf($video);
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('cover.jpg', 640, 360)));
+
+    $own = posterOf($video);
+    $resource = app(MediaReader::class)->byUuid($video->uuid);
+
+    expect($own->uuid)->toBe($video->refresh()->poster_uuid)
+        ->and($own->is_variant)->toBeTrue()
+        ->and($own->parent_uuid)->toBe($video->uuid)
+        ->and($own->width)->toBe(640)
+        ->and($resource->posterOwn)->toBeTrue()
+        ->and($resource->poster->url)->toEndWith($own->path)
+        ->and($video->placeholder)->toBe($own->placeholder)
+        // Kept: choosing a frame again needs nothing made.
+        ->and(MediaFile::query()->find($frame->uuid))->not->toBeNull();
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::frame(null));
+
+    expect(posterOf($video)->uuid)->toBe($frame->uuid)
+        ->and($video->refresh()->poster_uuid)->toBeNull()
+        ->and(MediaFile::query()->find($own->uuid))->toBeNull()
+        ->and(app(MediaReader::class)->byUuid($video->uuid)->posterOwn)->toBeFalse();
+});
+
+it('cuts an uploaded poster from the area chosen for the video', function () {
+    $video = storeClip(makeClip(320, 180));
+    $area = \KandySoft\MediaKit\Data\MediaCrop::of(0.6, 0.0, 0.4, 1.0);
+    app(MediaWriter::class)->crop($video->uuid, $area);
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('cover.png', 320, 180)));
+
+    expect(posterOf($video)->crop?->key())->toBe($area->key());
+
+    app(MediaWriter::class)->crop($video->uuid, null);
+
+    expect(posterOf($video)->crop)->toBeNull();
+});
+
+it('keeps an uploaded poster when pruning and when the video is processed again', function () {
+    $video = storeClip(makeClip());
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('cover.jpg', 320, 180)));
+    $own = posterOf($video);
+
+    app(VariantPruner::class)->stale();
+    $this->artisan('media:videos', ['--uuid' => $video->uuid, '--force' => true])->assertSuccessful();
+
+    expect(posterOf($video)->uuid)->toBe($own->uuid);
+});
+
+it('deletes an uploaded poster with its video, and replaces one uploaded before', function () {
+    $video = storeClip(makeClip());
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('a.jpg', 320, 180)));
+    $first = posterOf($video);
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('b.jpg', 320, 180)));
+    $second = posterOf($video);
+
+    expect($second->uuid)->not->toBe($first->uuid)
+        ->and(MediaFile::query()->find($first->uuid))->toBeNull()
+        ->and(Storage::disk('public')->exists($first->path))->toBeFalse();
+
+    app(MediaWriter::class)->delete($video->uuid);
+
+    expect(MediaFile::query()->find($second->uuid))->toBeNull()
+        ->and(Storage::disk('public')->exists($second->path))->toBeFalse();
+});
+
+it('refuses a poster that is not a picture', function () {
+    $video = storeClip(makeClip());
+
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(new UploadedFile(makeClip(), 'clip.mov', null, null, true)));
+})->throws(\KandySoft\MediaKit\Exceptions\UnsupportedFileType::class);
+
+it('takes the poster from a synced form, and leaves it when the form says nothing', function () {
+    Queue::fake();
+    $owner = videoOwnerModel();
+    $video = app(MediaWriter::class)->store(
+        MediaUpload::fromArray(['file' => new UploadedFile(makeClip(), 'clip.mov', null, null, true), 'poster' => ['at' => 0.8]]),
+        $owner,
+    );
+
+    expect($video->refresh()->poster_at)->toBe(0.8);
+    Queue::assertPushed(ProcessVideo::class, 1);
+
+    app(MediaWriter::class)->sync($owner, [MediaUpload::fromArray(['uuid' => $video->uuid])]);
+    expect($video->refresh()->poster_at)->toBe(0.8);
+
+    app(MediaWriter::class)->sync($owner, [MediaUpload::fromArray(['uuid' => $video->uuid, 'poster' => ['at' => null]])]);
+    expect($video->refresh()->poster_at)->toBeNull();
+});
+
+it('marks the file a list shows for its owner', function () {
+    Queue::fake();
+    $owner = videoOwnerModel();
+    $first = app(MediaWriter::class)->store(MediaUpload::file(UploadedFile::fake()->image('a.jpg', 40, 40)), $owner);
+    $second = app(MediaWriter::class)->store(MediaUpload::file(new UploadedFile(makeClip(), 'clip.mov', null, null, true)), $owner);
+
+    app(MediaWriter::class)->sync($owner, [
+        MediaUpload::fromArray(['uuid' => $first->uuid, 'cover' => false]),
+        MediaUpload::fromArray(['uuid' => $second->uuid, 'cover' => true]),
+    ]);
+
+    $payloads = collect(app(MediaReader::class)->forModel($owner))->map->toArray()->keyBy('uuid');
+
+    expect($payloads[$second->uuid]['cover'])->toBeTrue()
+        ->and($payloads[$first->uuid])->not->toHaveKey('cover');
+
+    // Said nothing about it — the mark stays.
+    app(MediaWriter::class)->sync($owner, [
+        MediaUpload::fromArray(['uuid' => $first->uuid]),
+        MediaUpload::fromArray(['uuid' => $second->uuid]),
+    ]);
+
+    expect($second->refresh()->is_cover)->toBeTrue();
+});
+
+it('copies the poster chosen for a video and the cover mark', function () {
+    $owner = videoOwnerModel();
+    $video = app(MediaWriter::class)->store(MediaUpload::fromArray([
+        'file' => new UploadedFile(makeClip(), 'clip.mov', null, null, true),
+        'cover' => true,
+    ]), $owner);
+    app(MediaWriter::class)->poster($video->uuid, MediaPoster::image(UploadedFile::fake()->image('cover.jpg', 320, 180)));
+
+    [$copy] = app(MediaWriter::class)->copy($owner, $target = videoOwnerModel());
+
+    expect($copy->refresh()->is_cover)->toBeTrue()
+        ->and(posterOf($copy)->uuid)->toBe($copy->poster_uuid)
+        ->and(posterOf($copy)->width)->toBe(320);
 });

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.12.0
+
+### Poster and cover
+
+- **Chosen poster** (`Data\MediaPoster`, `MediaWriter::poster()`): a video's poster is taken from
+  the second chosen for it (`MediaPoster::frame($at)`, `null` — `video.poster_at`), or is a
+  picture uploaded for it (`MediaPoster::image($file)`). A frame is made in the background
+  without encoding the video again; until it is ready the poster made before is shown. An
+  uploaded poster is a rendition of the video (`parent_uuid`), cut from the area chosen for it,
+  kept by `media:prune` and `media:videos --force`, deleted with the video, carried by `copy()`.
+  Choosing a frame puts it aside.
+- **Cover** (`media_files.is_cover`): the file a list shows for its owner instead of the first
+  one. `cover` on `MediaUpload` (null leaves it), `cover: true` in `MediaResource::toArray()`.
+- `MediaResource`: `cover`, `posterAt`, `posterOwn`.
+- New columns `poster_at`, `poster_uuid`, `is_cover` (migration `add_media_poster_and_cover`).
+- `ProcessVideo` makes only what is missing: a new poster frame no longer re-encodes the copy.
+- Fixed: `store()` of an upload kept on an object store lost its `fit`.
+
 ## 1.11.0
 
 ### Video

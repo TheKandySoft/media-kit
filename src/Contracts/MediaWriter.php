@@ -8,6 +8,7 @@ use KandySoft\MediaKit\Data\ImageSize;
 use KandySoft\MediaKit\Data\MediaCaption;
 use KandySoft\MediaKit\Data\MediaCrop;
 use KandySoft\MediaKit\Data\MediaFilter;
+use KandySoft\MediaKit\Data\MediaPoster;
 use KandySoft\MediaKit\Data\MediaUpload;
 use KandySoft\MediaKit\Enums\MediaFit;
 use KandySoft\MediaKit\Models\MediaFile;
@@ -76,6 +77,16 @@ interface MediaWriter
      * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
      */
     public function fit(string $uuid, MediaFit $fit): MediaFile;
+
+    /**
+     * What a video's poster is made from: a moment of the video, or a picture
+     * uploaded for it — see `MediaPoster`. A frame is made in the background;
+     * until then the poster made before is shown.
+     *
+     * @throws \KandySoft\MediaKit\Exceptions\MediaNotFound
+     * @throws \KandySoft\MediaKit\Exceptions\UnsupportedFileType  a poster that is not a picture
+     */
+    public function poster(string $uuid, MediaPoster $poster): MediaFile;
 
     /**
      * Register a file that is already sitting on a disk.

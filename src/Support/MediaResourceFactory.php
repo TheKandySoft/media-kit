@@ -79,6 +79,7 @@ final class MediaResourceFactory
             captions: $captions,
             placeholder: $media->placeholder,
             crop: $media->type->isImage() ? $media->crop : null,
+            cover: (bool) $media->is_cover,
         );
     }
 
@@ -129,6 +130,9 @@ final class MediaResourceFactory
             poster: $posterResource,
             fit: $media->fit,
             focusPoint: $this->videoFocus($media, $size),
+            cover: (bool) $media->is_cover,
+            posterAt: $media->poster_at,
+            posterOwn: $media->poster_uuid !== null && $poster?->uuid === $media->poster_uuid,
         );
     }
 
